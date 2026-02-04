@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
 # Add src to path
@@ -88,6 +88,12 @@ class SearchResult(BaseModel):
 async def root():
     """Serve the frontend."""
     return FileResponse("static/index.html")
+
+
+@app.get("/favicon.ico")
+async def favicon():
+    """Return empty favicon to prevent 404."""
+    return Response(content=b"", media_type="image/x-icon")
 
 
 @app.get("/api/health")
