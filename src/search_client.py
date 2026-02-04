@@ -24,7 +24,7 @@ class VideoSearchClient:
     DEFAULT_WEIGHTS = {
         "visual": 0.8,
         "audio": 0.1,
-        "transcription": 0.1
+        "transcription": 0.05
     }
 
     # RRF constant (standard value used by Elasticsearch, etc.)
