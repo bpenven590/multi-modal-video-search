@@ -4,17 +4,50 @@ Multi-Modal Video Search Client
 Performs fusion search across visual, audio, and transcription
 embeddings stored in MongoDB Atlas.
 
-Supports two fusion methods:
-1. Reciprocal Rank Fusion (RRF) - default, more robust
+Supports multiple fusion methods:
+1. Reciprocal Rank Fusion (RRF) - rank-based fusion, more robust
 2. Weighted Score Fusion - simple weighted sum
+3. Dynamic Intent Routing - auto-calculates weights based on query intent
 
 RRF formula: score(d) = Σ w_m / (k + rank_m(d))
 """
 
+import math
 from typing import Optional
 from pymongo import MongoClient
 
 from bedrock_client import BedrockMarengoClient
+
+
+# Anchor text prompts for dynamic intent routing (Section 4.3 of whitepaper)
+ANCHOR_PROMPTS = {
+    "visual": "What appears on screen: people, objects, scenes, actions, clothing, colors, and visual composition of the video.",
+    "audio": "The non-speech audio in the video: music, sound effects, ambient sound, and other audio elements.",
+    "transcription": "The spoken words in the video: dialogue, narration, speech, and what people say."
+}
+
+
+def cosine_similarity(vec1: list, vec2: list) -> float:
+    """Compute cosine similarity between two vectors."""
+    dot_product = sum(a * b for a, b in zip(vec1, vec2))
+    norm1 = math.sqrt(sum(a * a for a in vec1))
+    norm2 = math.sqrt(sum(b * b for b in vec2))
+    if norm1 == 0 or norm2 == 0:
+        return 0.0
+    return dot_product / (norm1 * norm2)
+
+
+def softmax_with_temperature(scores: dict, temperature: float = 10.0) -> dict:
+    """Apply softmax with temperature to get weights."""
+    # Scale by temperature
+    scaled = {k: v * temperature for k, v in scores.items()}
+    # Compute max for numerical stability
+    max_val = max(scaled.values())
+    # Compute exp
+    exp_scores = {k: math.exp(v - max_val) for k, v in scaled.items()}
+    # Normalize
+    total = sum(exp_scores.values())
+    return {k: v / total for k, v in exp_scores.items()}
 
 
 class VideoSearchClient:
@@ -29,6 +62,9 @@ class VideoSearchClient:
 
     # RRF constant (standard value used by Elasticsearch, etc.)
     RRF_K = 60
+
+    # Temperature for softmax in dynamic routing
+    SOFTMAX_TEMPERATURE = 10.0
 
     def __init__(
         self,
@@ -45,6 +81,58 @@ class VideoSearchClient:
             region=bedrock_region,
             output_bucket="tl-brice-media"
         )
+        # Anchor embeddings for dynamic routing (lazy initialized)
+        self._anchor_embeddings = None
+
+    def initialize_anchors(self) -> dict:
+        """
+        Pre-compute anchor embeddings for dynamic intent routing.
+        Call this at app startup to avoid latency on first query.
+        """
+        if self._anchor_embeddings is not None:
+            return self._anchor_embeddings
+
+        self._anchor_embeddings = {}
+        for modality, prompt in ANCHOR_PROMPTS.items():
+            result = self.bedrock.get_text_query_embedding(prompt)
+            self._anchor_embeddings[modality] = result["embedding"]
+
+        return self._anchor_embeddings
+
+    def get_anchor_embeddings(self) -> dict:
+        """Get anchor embeddings, initializing if needed."""
+        if self._anchor_embeddings is None:
+            self.initialize_anchors()
+        return self._anchor_embeddings
+
+    def compute_dynamic_weights(
+        self,
+        query_embedding: list,
+        temperature: float = None
+    ) -> dict:
+        """
+        Compute dynamic weights based on query intent (Section 4.3).
+
+        Uses cosine similarity between query and anchor embeddings,
+        then applies softmax with temperature to get weights.
+        """
+        if temperature is None:
+            temperature = self.SOFTMAX_TEMPERATURE
+
+        anchors = self.get_anchor_embeddings()
+
+        # Compute cosine similarities
+        similarities = {}
+        for modality, anchor_emb in anchors.items():
+            similarities[modality] = cosine_similarity(query_embedding, anchor_emb)
+
+        # Apply softmax with temperature
+        weights = softmax_with_temperature(similarities, temperature)
+
+        return {
+            "weights": weights,
+            "similarities": similarities
+        }
 
     def search(
         self,
@@ -53,7 +141,8 @@ class VideoSearchClient:
         weights: Optional[dict] = None,
         limit: int = 50,
         video_id: Optional[str] = None,
-        fusion_method: str = "rrf"  # "rrf" or "weighted"
+        fusion_method: str = "rrf",  # "rrf", "weighted", or "dynamic"
+        k_per_modality: int = 20
     ) -> list:
         """
         Search for video segments matching a text query.
@@ -227,6 +316,87 @@ class VideoSearchClient:
         )
 
         return ranked[:limit]
+
+    def search_dynamic(
+        self,
+        query: str,
+        limit: int = 50,
+        video_id: Optional[str] = None,
+        temperature: float = None
+    ) -> dict:
+        """
+        Search with dynamic intent-based routing (Section 4.3 of whitepaper).
+
+        Automatically determines modality weights based on query semantics.
+
+        Args:
+            query: Text search query
+            limit: Maximum results
+            video_id: Optional filter by specific video
+            temperature: Softmax temperature (higher = more uniform weights)
+
+        Returns:
+            Dict with 'results', 'weights', and 'similarities'
+        """
+        if temperature is None:
+            temperature = self.SOFTMAX_TEMPERATURE
+
+        # Generate query embedding
+        query_result = self.bedrock.get_text_query_embedding(query)
+        query_embedding = query_result["embedding"]
+
+        if not query_embedding:
+            return {"results": [], "weights": {}, "similarities": {}}
+
+        # Compute dynamic weights based on query intent
+        dynamic_result = self.compute_dynamic_weights(query_embedding, temperature)
+        weights = dynamic_result["weights"]
+        similarities = dynamic_result["similarities"]
+
+        # Search each modality
+        modalities = ["visual", "audio", "transcription"]
+        modality_results = {}
+
+        for modality in modalities:
+            filter_doc = {"modality_type": modality}
+            if video_id:
+                filter_doc["video_id"] = video_id
+
+            pipeline = [
+                {
+                    "$vectorSearch": {
+                        "index": self.index_name,
+                        "path": "embedding",
+                        "queryVector": query_embedding,
+                        "numCandidates": limit * 6,
+                        "limit": limit * 2,
+                        "filter": filter_doc
+                    }
+                },
+                {
+                    "$project": {
+                        "video_id": 1,
+                        "start_time": 1,
+                        "end_time": 1,
+                        "s3_uri": 1,
+                        "segment_id": 1,
+                        "modality_type": 1,
+                        "score": {"$meta": "vectorSearchScore"}
+                    }
+                }
+            ]
+
+            results = list(self.collection.aggregate(pipeline))
+            modality_results[modality] = results
+
+        # Apply weighted fusion with dynamic weights
+        results = self._weighted_fusion(modality_results, weights, limit)
+
+        return {
+            "results": results,
+            "weights": weights,
+            "similarities": similarities
+        }
 
     def get_videos(self) -> list:
         """Get list of all indexed videos."""

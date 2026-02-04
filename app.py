@@ -68,7 +68,8 @@ class SearchRequest(BaseModel):
     weights: Optional[dict] = None
     limit: int = 50
     video_id: Optional[str] = None
-    fusion_method: str = "rrf"  # "rrf" or "weighted"
+    fusion_method: str = "rrf"  # "rrf", "weighted", or "dynamic"
+    temperature: Optional[float] = 10.0  # For dynamic mode
 
 
 class SearchResult(BaseModel):
@@ -80,8 +81,27 @@ class SearchResult(BaseModel):
     s3_uri: str
     fusion_score: float
     modality_scores: dict
+    modality_ranks: Optional[dict] = None  # For RRF mode
     video_url: Optional[str] = None
     thumbnail_url: Optional[str] = None
+
+
+class DynamicSearchResponse(BaseModel):
+    """Response for dynamic search with computed weights."""
+    results: list
+    computed_weights: dict
+    anchor_similarities: dict
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize anchor embeddings at startup for dynamic routing."""
+    try:
+        client = get_search_client()
+        client.initialize_anchors()
+        print("Anchor embeddings initialized for dynamic routing")
+    except Exception as e:
+        print(f"Warning: Failed to initialize anchors at startup: {e}")
 
 
 @app.get("/")
@@ -155,6 +175,47 @@ async def search_get(
         limit=limit,
         video_id=video_id
     ))
+
+
+@app.post("/api/search/dynamic")
+async def search_dynamic(request: SearchRequest) -> DynamicSearchResponse:
+    """
+    Search with dynamic intent-based routing.
+
+    Automatically determines modality weights based on query semantics.
+    Returns computed weights alongside results.
+
+    - **query**: Text search query
+    - **limit**: Max results (default 50)
+    - **video_id**: Filter by specific video
+    - **temperature**: Softmax temperature (default 10.0, higher = more uniform)
+    """
+    client = get_search_client()
+
+    response = client.search_dynamic(
+        query=request.query,
+        limit=request.limit,
+        video_id=request.video_id,
+        temperature=request.temperature
+    )
+
+    results = response["results"]
+
+    # Add CloudFront URLs for fast video playback
+    for result in results:
+        s3_uri = result["s3_uri"]
+        parsed = urlparse(s3_uri)
+        key = parsed.path.lstrip("/")
+
+        proxy_key = key.replace("WBD_project/Videos/", "WBD_project/Videos/proxy/")
+        result["video_url"] = f"https://{CLOUDFRONT_DOMAIN}/{proxy_key}"
+        result["thumbnail_url"] = f"/api/thumbnail/{result['video_id']}/{result['segment_id']}"
+
+    return DynamicSearchResponse(
+        results=results,
+        computed_weights=response["weights"],
+        anchor_similarities=response["similarities"]
+    )
 
 
 @app.get("/api/videos")

@@ -401,6 +401,13 @@
             display: block;
         }
 
+        .weights-panel-title {
+            font-size: 0.875rem;
+            color: #a78bfa;
+            margin-bottom: 0.75rem;
+            font-weight: 500;
+        }
+
         .weight-row {
             display: flex;
             align-items: center;
@@ -437,6 +444,109 @@
             font-size: 0.875rem;
             color: #a78bfa;
         }
+
+        /* Dynamic Weights Display */
+        .dynamic-weights-panel {
+            background: #16213e;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+            display: none;
+        }
+
+        .dynamic-weights-panel.active {
+            display: block;
+        }
+
+        .dynamic-weight-bar {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .dynamic-weight-label {
+            width: 100px;
+            font-size: 0.875rem;
+            color: #9ca3af;
+        }
+
+        .dynamic-weight-bar-container {
+            flex: 1;
+            height: 8px;
+            background: #3d3d5c;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .dynamic-weight-bar-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
+
+        .dynamic-weight-bar-fill.visual { background: #60a5fa; }
+        .dynamic-weight-bar-fill.audio { background: #34d399; }
+        .dynamic-weight-bar-fill.transcription { background: #fbbf24; }
+
+        .dynamic-weight-value {
+            width: 50px;
+            text-align: right;
+            font-size: 0.875rem;
+            font-weight: 600;
+        }
+
+        .dynamic-weight-value.visual { color: #60a5fa; }
+        .dynamic-weight-value.audio { color: #34d399; }
+        .dynamic-weight-value.transcription { color: #fbbf24; }
+
+        /* Dominant modality indicator */
+        .dominant-indicator {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.65rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .dominant-indicator.visual { background: rgba(59, 130, 246, 0.8); color: #fff; }
+        .dominant-indicator.audio { background: rgba(16, 185, 129, 0.8); color: #fff; }
+        .dominant-indicator.transcription { background: rgba(245, 158, 11, 0.8); color: #fff; }
+
+        /* Modality score bars in cards */
+        .modality-bars {
+            display: flex;
+            gap: 2px;
+            margin-top: 0.5rem;
+        }
+
+        .modality-bar {
+            flex: 1;
+            height: 4px;
+            border-radius: 2px;
+            background: #3d3d5c;
+            overflow: hidden;
+        }
+
+        .modality-bar-fill {
+            height: 100%;
+            transition: width 0.2s ease;
+        }
+
+        .modality-bar-fill.visual { background: #60a5fa; }
+        .modality-bar-fill.audio { background: #34d399; }
+        .modality-bar-fill.transcription { background: #fbbf24; }
+
+        /* Mode description */
+        .mode-description {
+            font-size: 0.75rem;
+            color: #6b7280;
+            margin-top: 0.5rem;
+            font-style: italic;
+        }
     </style>
 </head>
 <body>
@@ -461,15 +571,20 @@
         </div>
 
         <div class="modality-selector">
-            <button class="modality-btn active" data-mode="fused">Fused</button>
-            <button class="modality-btn" data-mode="visual">Visual</button>
-            <button class="modality-btn" data-mode="audio">Audio</button>
-            <button class="modality-btn" data-mode="transcription">Speech</button>
+            <button class="modality-btn" data-mode="rrf" title="Reciprocal Rank Fusion">RRF</button>
+            <button class="modality-btn active" data-mode="weighted" title="Weighted Score Fusion">Weighted</button>
+            <button class="modality-btn" data-mode="dynamic" title="Dynamic Intent Routing">Dynamic</button>
+            <span style="color: #3d3d5c; margin: 0 0.25rem;">|</span>
+            <button class="modality-btn" data-mode="visual" title="Visual only">Visual</button>
+            <button class="modality-btn" data-mode="audio" title="Audio only">Audio</button>
+            <button class="modality-btn" data-mode="transcription" title="Speech only">Speech</button>
         </div>
     </header>
 
     <main>
+        <!-- Weighted mode: manual sliders -->
         <div class="weights-panel active" id="weightsPanel">
+            <div class="weights-panel-title">Adjust Modality Weights</div>
             <div class="weight-row">
                 <span class="weight-label">Visual</span>
                 <input type="range" class="weight-slider" id="visualWeight" min="0" max="100" value="80">
@@ -485,6 +600,40 @@
                 <input type="range" class="weight-slider" id="transcriptionWeight" min="0" max="100" value="5">
                 <span class="weight-value" id="transcriptionValue">0.05</span>
             </div>
+            <div class="mode-description">Weighted Score Fusion: score = Σ(weight × similarity)</div>
+        </div>
+
+        <!-- Dynamic mode: auto-computed weights display -->
+        <div class="dynamic-weights-panel" id="dynamicWeightsPanel">
+            <div class="weights-panel-title">Auto-Computed Weights (based on query intent)</div>
+            <div class="dynamic-weight-bar">
+                <span class="dynamic-weight-label">Visual</span>
+                <div class="dynamic-weight-bar-container">
+                    <div class="dynamic-weight-bar-fill visual" id="dynamicVisualBar" style="width: 0%"></div>
+                </div>
+                <span class="dynamic-weight-value visual" id="dynamicVisualValue">-</span>
+            </div>
+            <div class="dynamic-weight-bar">
+                <span class="dynamic-weight-label">Audio</span>
+                <div class="dynamic-weight-bar-container">
+                    <div class="dynamic-weight-bar-fill audio" id="dynamicAudioBar" style="width: 0%"></div>
+                </div>
+                <span class="dynamic-weight-value audio" id="dynamicAudioValue">-</span>
+            </div>
+            <div class="dynamic-weight-bar">
+                <span class="dynamic-weight-label">Transcription</span>
+                <div class="dynamic-weight-bar-container">
+                    <div class="dynamic-weight-bar-fill transcription" id="dynamicTranscriptionBar" style="width: 0%"></div>
+                </div>
+                <span class="dynamic-weight-value transcription" id="dynamicTranscriptionValue">-</span>
+            </div>
+            <div class="mode-description">Intent-Based Dynamic Routing: weights computed from query similarity to modality anchors</div>
+        </div>
+
+        <!-- RRF mode info -->
+        <div class="weights-panel" id="rrfPanel">
+            <div class="weights-panel-title">Reciprocal Rank Fusion (RRF)</div>
+            <div class="mode-description">RRF formula: score(d) = Σ 1/(60 + rank_m) — rank-based fusion, robust to score distribution differences</div>
         </div>
 
         <div class="results-header">
@@ -521,9 +670,10 @@
 
     <script>
         // State
-        let currentMode = 'fused';
+        let currentMode = 'weighted';
         let currentResults = [];
         let preloadedVideoUrl = null;
+        let lastDynamicWeights = null;
 
         // DOM Elements
         const searchInput = document.getElementById('searchInput');
@@ -532,11 +682,40 @@
         const queryDisplay = document.getElementById('queryDisplay');
         const resultsCount = document.getElementById('resultsCount');
         const weightsPanel = document.getElementById('weightsPanel');
+        const dynamicWeightsPanel = document.getElementById('dynamicWeightsPanel');
+        const rrfPanel = document.getElementById('rrfPanel');
         const videoModal = document.getElementById('videoModal');
         const videoPlayer = document.getElementById('videoPlayer');
         const modalTitle = document.getElementById('modalTitle');
         const modalInfo = document.getElementById('modalInfo');
         const modalClose = document.getElementById('modalClose');
+
+        // Multi-vector modes that use all modalities
+        const MULTI_VECTOR_MODES = ['rrf', 'weighted', 'dynamic'];
+
+        // Update panel visibility based on mode
+        function updatePanelVisibility() {
+            weightsPanel.classList.toggle('active', currentMode === 'weighted');
+            dynamicWeightsPanel.classList.toggle('active', currentMode === 'dynamic');
+            rrfPanel.classList.toggle('active', currentMode === 'rrf');
+        }
+
+        // Update dynamic weights display
+        function updateDynamicWeightsDisplay(weights) {
+            if (!weights) return;
+            lastDynamicWeights = weights;
+
+            ['visual', 'audio', 'transcription'].forEach(modality => {
+                const value = weights[modality] || 0;
+                const percentage = (value * 100).toFixed(1);
+                document.getElementById(`dynamic${capitalize(modality)}Bar`).style.width = `${percentage}%`;
+                document.getElementById(`dynamic${capitalize(modality)}Value`).textContent = value.toFixed(3);
+            });
+        }
+
+        function capitalize(str) {
+            return str.charAt(0).toUpperCase() + str.slice(1);
+        }
 
         // Modality buttons
         document.querySelectorAll('.modality-btn').forEach(btn => {
@@ -545,8 +724,8 @@
                 btn.classList.add('active');
                 currentMode = btn.dataset.mode;
 
-                // Show weights panel only for fused mode
-                weightsPanel.classList.toggle('active', currentMode === 'fused');
+                // Update panel visibility
+                updatePanelVisibility();
 
                 // Re-run search if we have a query
                 if (searchInput.value.trim()) {
@@ -555,13 +734,22 @@
             });
         });
 
-        // Weight sliders
+        // Weight sliders with debounced search
+        let sliderDebounceTimer = null;
         ['visual', 'audio', 'transcription'].forEach(type => {
             const slider = document.getElementById(`${type}Weight`);
             const value = document.getElementById(`${type}Value`);
 
             slider.addEventListener('input', () => {
                 value.textContent = (slider.value / 100).toFixed(2);
+
+                // Debounce search trigger
+                clearTimeout(sliderDebounceTimer);
+                sliderDebounceTimer = setTimeout(() => {
+                    if (searchInput.value.trim() && currentMode === 'weighted') {
+                        performSearch();
+                    }
+                }, 500);
             });
         });
 
@@ -580,43 +768,79 @@
             queryDisplay.textContent = query;
             resultsCount.textContent = '';
 
-            // Build request
-            const request = {
-                query: query,
-                limit: 50,
-                fusion_method: 'rrf'
-            };
-
-            if (currentMode !== 'fused') {
-                request.modalities = [currentMode];
-            } else {
-                // Get custom weights
-                const visualW = document.getElementById('visualWeight').value / 100;
-                const audioW = document.getElementById('audioWeight').value / 100;
-                const transW = document.getElementById('transcriptionWeight').value / 100;
-
-                request.weights = {
-                    visual: visualW,
-                    audio: audioW,
-                    transcription: transW
-                };
-            }
-
             try {
-                const response = await fetch('/api/search', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(request)
-                });
+                let results;
 
-                if (!response.ok) throw new Error('Search failed');
+                if (currentMode === 'dynamic') {
+                    // Dynamic intent-based routing
+                    const request = { query, limit: 50 };
+                    const response = await fetch('/api/search/dynamic', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(request)
+                    });
 
-                currentResults = await response.json();
-                renderResults(currentResults);
+                    if (!response.ok) throw new Error('Search failed');
+
+                    const data = await response.json();
+                    results = data.results;
+                    updateDynamicWeightsDisplay(data.computed_weights);
+
+                } else if (MULTI_VECTOR_MODES.includes(currentMode)) {
+                    // RRF or Weighted fusion
+                    const request = {
+                        query,
+                        limit: 50,
+                        fusion_method: currentMode === 'rrf' ? 'rrf' : 'weighted'
+                    };
+
+                    if (currentMode === 'weighted') {
+                        // Get custom weights from sliders
+                        const visualW = document.getElementById('visualWeight').value / 100;
+                        const audioW = document.getElementById('audioWeight').value / 100;
+                        const transW = document.getElementById('transcriptionWeight').value / 100;
+
+                        request.weights = {
+                            visual: visualW,
+                            audio: audioW,
+                            transcription: transW
+                        };
+                    }
+
+                    const response = await fetch('/api/search', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(request)
+                    });
+
+                    if (!response.ok) throw new Error('Search failed');
+                    results = await response.json();
+
+                } else {
+                    // Single modality search (visual, audio, transcription)
+                    const request = {
+                        query,
+                        limit: 50,
+                        modalities: [currentMode],
+                        fusion_method: 'weighted'
+                    };
+
+                    const response = await fetch('/api/search', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(request)
+                    });
+
+                    if (!response.ok) throw new Error('Search failed');
+                    results = await response.json();
+                }
+
+                currentResults = results;
+                renderResults(results);
 
                 // Preload first result video
-                if (currentResults.length > 0 && currentResults[0].video_url) {
-                    preloadedVideoUrl = currentResults[0].video_url;
+                if (results.length > 0 && results[0].video_url) {
+                    preloadedVideoUrl = results[0].video_url;
                 }
             } catch (error) {
                 console.error('Search error:', error);
@@ -629,7 +853,8 @@
         }
 
         function renderResults(results) {
-            resultsCount.textContent = `Displaying ${results.length} results`;
+            const modeLabel = getModeLabel(currentMode);
+            resultsCount.textContent = `${results.length} results (${modeLabel})`;
 
             if (results.length === 0) {
                 resultsContainer.innerHTML = `
@@ -654,10 +879,35 @@
                 // Extract filename from s3_uri
                 const filename = result.s3_uri.split('/').pop() || 'Video';
 
-                // Build modality tags
-                const modalityTags = Object.entries(result.modality_scores || {})
-                    .map(([mod, score]) => `<span class="meta-tag ${mod}">${mod}: ${score.toFixed(2)}</span>`)
+                // Build modality tags with scores
+                const modalityScores = result.modality_scores || {};
+                const modalityTags = Object.entries(modalityScores)
+                    .map(([mod, score]) => `<span class="meta-tag ${mod}">${mod.substring(0, 3)}: ${score.toFixed(2)}</span>`)
                     .join('');
+
+                // Find dominant modality
+                let dominantModality = null;
+                let maxScore = 0;
+                for (const [mod, score] of Object.entries(modalityScores)) {
+                    if (score > maxScore) {
+                        maxScore = score;
+                        dominantModality = mod;
+                    }
+                }
+
+                // Build modality score bars
+                const maxPossibleScore = Math.max(...Object.values(modalityScores), 0.001);
+                const modalityBars = ['visual', 'audio', 'transcription'].map(mod => {
+                    const score = modalityScores[mod] || 0;
+                    const width = (score / maxPossibleScore * 100).toFixed(1);
+                    return `<div class="modality-bar"><div class="modality-bar-fill ${mod}" style="width: ${width}%"></div></div>`;
+                }).join('');
+
+                // Dominant indicator (only show for multi-vector modes)
+                const showDominant = MULTI_VECTOR_MODES.includes(currentMode) && dominantModality;
+                const dominantIndicator = showDominant
+                    ? `<span class="dominant-indicator ${dominantModality}">${dominantModality.substring(0, 3)}</span>`
+                    : '';
 
                 // Create card with video thumbnail
                 card.innerHTML = `
@@ -683,12 +933,16 @@
                             </svg>
                         </div>
                         <span class="score-badge">${result.fusion_score.toFixed(3)}</span>
+                        ${dominantIndicator}
                         <span class="duration-badge">${startTime} - ${endTime}</span>
                     </div>
                     <div class="card-info">
                         <div class="card-title">${filename}</div>
                         <div class="card-meta">
                             ${modalityTags}
+                        </div>
+                        <div class="modality-bars">
+                            ${modalityBars}
                         </div>
                     </div>
                 `;
@@ -701,6 +955,18 @@
 
             // Initialize video thumbnails
             initializeThumbnails();
+        }
+
+        function getModeLabel(mode) {
+            const labels = {
+                'rrf': 'RRF Fusion',
+                'weighted': 'Weighted Fusion',
+                'dynamic': 'Dynamic Routing',
+                'visual': 'Visual Only',
+                'audio': 'Audio Only',
+                'transcription': 'Speech Only'
+            };
+            return labels[mode] || mode;
         }
 
         function initializeThumbnails() {
@@ -754,10 +1020,16 @@
             const filename = result.s3_uri.split('/').pop() || 'Video';
             modalTitle.textContent = `${filename} - ${formatTime(result.start_time)}`;
 
+            // Build modality scores display
+            const modalityScoresHtml = Object.entries(result.modality_scores || {})
+                .map(([mod, score]) => `<span class="meta-tag ${mod}">${mod}: ${score.toFixed(4)}</span>`)
+                .join('');
+
             modalInfo.innerHTML = `
                 <span class="meta-tag">Segment: ${result.segment_id}</span>
                 <span class="meta-tag">Time: ${formatTime(result.start_time)} - ${formatTime(result.end_time)}</span>
-                <span class="meta-tag">Score: ${result.fusion_score.toFixed(4)}</span>
+                <span class="meta-tag">Fusion Score: ${result.fusion_score.toFixed(4)}</span>
+                ${modalityScoresHtml}
             `;
 
             // Show modal and play
