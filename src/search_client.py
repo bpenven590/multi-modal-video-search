@@ -261,15 +261,34 @@ class VideoSearchClient:
         # Route to correct backend
         if backend == "s3vectors":
             s3v_client = self.get_s3_vectors_client()
-            return s3v_client.search_with_fusion(
-                query_embedding=query_embeddings[modalities[0]],  # TODO: Handle decomposed queries
-                modalities=modalities,
-                weights=weights,
-                limit=limit,
-                video_id_filter=video_id,
-                fusion_method=fusion_method,
-                use_multi_index=use_multi_index  # Pass index mode
-            )
+
+            # Search each modality with its specific embedding
+            modality_results = {}
+            for modality in modalities:
+                weight = weights.get(modality, 1.0)
+                if weight == 0:
+                    continue
+
+                query_embedding = query_embeddings.get(modality)
+                if not query_embedding:
+                    continue
+
+                # Search this modality with its specific embedding
+                results = s3v_client.multi_modality_search(
+                    query_embedding=query_embedding,
+                    limit_per_modality=limit * 2,
+                    modalities=[modality],
+                    video_id_filter=video_id,
+                    use_multi_index=use_multi_index
+                )
+
+                modality_results[modality] = results.get(modality, [])
+
+            # Apply fusion
+            if fusion_method == "rrf":
+                return self._rrf_fusion(modality_results, weights, limit)
+            else:
+                return self._weighted_fusion(modality_results, weights, limit)
 
         # MongoDB backend
         elif backend == "mongodb":
@@ -481,32 +500,23 @@ class VideoSearchClient:
             for modality in modalities:
                 query_embeddings[modality] = query_embedding
 
-        # Use S3 Vectors for multi-index mode
-        if use_multi_index:
-            # For S3 Vectors with decomposition, we need to search each modality separately
-            if decomposed_queries:
-                modality_results = {}
-                s3v_client = self.get_s3_vectors_client()
-                for modality in modalities:
-                    modality_results[modality] = s3v_client.vector_search(
-                        query_embedding=query_embeddings[modality],
-                        modality=modality,
-                        limit=limit * 2,
-                        video_id_filter=video_id
-                    )
-                # Apply weighted fusion with dynamic weights
-                results = self._weighted_fusion(modality_results, weights, limit)
-            else:
-                # Use original single-embedding approach
-                s3v_client = self.get_s3_vectors_client()
-                results = s3v_client.search_with_fusion(
-                    query_embedding=query_embedding,
-                    modalities=modalities,
-                    weights=weights,
-                    limit=limit,
+        # Route to correct backend
+        if backend == "s3vectors":
+            # Search each modality with its specific embedding
+            modality_results = {}
+            s3v_client = self.get_s3_vectors_client()
+            for modality in modalities:
+                results = s3v_client.multi_modality_search(
+                    query_embedding=query_embeddings[modality],
+                    limit_per_modality=limit * 2,
+                    modalities=[modality],
                     video_id_filter=video_id,
-                    fusion_method="weighted"
+                    use_multi_index=use_multi_index
                 )
+                modality_results[modality] = results.get(modality, [])
+
+            # Apply weighted fusion with dynamic weights
+            results = self._weighted_fusion(modality_results, weights, limit)
 
             response = {
                 "results": results,
@@ -517,53 +527,21 @@ class VideoSearchClient:
                 response["query_embedding"] = query_embedding
             return response
 
-        # MongoDB single-index mode
-        modality_results = {}
+        # MongoDB backend
+        elif backend == "mongodb":
+            modality_results = {}
+            mongo_client = self.get_mongodb_client()
 
-        for modality in modalities:
-            collection = self.collection
-            filter_doc = {"modality_type": modality}
-            if video_id:
-                filter_doc["video_id"] = video_id
-
-            # Use modality-specific query embedding
-            modality_embedding = query_embeddings[modality]
-
-            # Build projection fields
-            projection = {
-                "video_id": 1,
-                "start_time": 1,
-                "end_time": 1,
-                "s3_uri": 1,
-                "segment_id": 1,
-                "score": {"$meta": "vectorSearchScore"}
-            }
-            if return_embeddings:
-                projection["embedding"] = 1
-
-            pipeline = [
-                {
-                    "$vectorSearch": {
-                        "index": self.index_name,
-                        "path": "embedding",
-                        "queryVector": modality_embedding,
-                        "numCandidates": limit * 6,
-                        "limit": limit * 2,
-                        "filter": filter_doc
-                    }
-                },
-                {
-                    "$project": projection
-                }
-            ]
-
-            results = list(collection.aggregate(pipeline))
-
-            # Add modality_type back for consistency
-            for r in results:
-                r["modality_type"] = modality
-
-            modality_results[modality] = results
+            for modality in modalities:
+                # Search this modality with its specific embedding
+                results = mongo_client.multi_modality_search(
+                    query_embedding=query_embeddings[modality],
+                    limit_per_modality=limit * 2,
+                    modalities=[modality],
+                    video_id_filter=video_id,
+                    use_multi_index=use_multi_index
+                )
+                modality_results[modality] = results.get(modality, [])
 
         # Apply weighted fusion with dynamic weights
         results = self._weighted_fusion(modality_results, weights, limit)
