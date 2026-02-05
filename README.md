@@ -6,6 +6,52 @@ A video semantic search pipeline using AWS Bedrock Marengo 3.0 with dual vector 
 
 **Search UI:** https://nyfwaxmgni.us-east-1.awsapprunner.com
 
+## Search UI Features
+
+The web interface provides multiple search modes and backend options:
+
+### Search Modes
+
+**Fused Approaches** (multi-vector fusion):
+- **RRF** - Reciprocal Rank Fusion (rank-based)
+- **Weighted** - Score-based fusion with adjustable weights
+- **Dynamic** - Intent-based routing with query anchors
+
+**Single Modality**:
+- **Visual** - Visual content only
+- **Audio** - Audio/sound only
+- **Speech** - Transcription/dialogue only
+
+### Backend Toggle
+
+- **MongoDB (Single Index)** - One collection with modality filter
+- **S3 Vectors (Multi-Index)** - Separate index per modality
+
+### Result Card Layout
+
+Each search result displays ranking, confidence, and modality breakdown:
+
+```
+┌─────────────────────────────┐
+│ #1           85%     [VIS]  │  ← Rank, Confidence %, Dominant Modality
+│                             │
+│     [Video Thumbnail]       │
+│                             │
+│         0:30 - 1:15         │  ← Timestamp Range
+└─────────────────────────────┘
+  Video Title
+  vis: 0.85  aud: 0.12  tra: 0.03  ← Individual Modality Scores
+  ███████░░ ███░░░░░░ █░░░░░░░░  ← Visual Score Bars
+```
+
+**Key Features:**
+- **Ranking Badge** (#1, #2, #3...) - Shows result position
+- **Confidence %** - Match confidence (0-100%)
+- **Dominant Badge** - Which modality scored highest (VIS/AUD/TRA)
+- **Modality Scores** - Detailed breakdown per embedding type
+- **Score Visualization** - Visual bars showing relative strengths
+- **20 Results per Page** - Focused, high-quality results
+
 ## Architecture Overview
 
 ```
