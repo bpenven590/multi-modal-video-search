@@ -1742,7 +1742,9 @@
 
                 // Calculate rank and confidence percentage
                 const rank = index + 1;
-                const confidencePercent = Math.round(result.fusion_score * 100);
+                // Use confidence_score (max modality match) if available, otherwise fusion_score
+                const confidenceScore = result.confidence_score !== undefined ? result.confidence_score : result.fusion_score;
+                const confidencePercent = Math.round(confidenceScore * 100);
 
                 // Create card with video thumbnail
                 card.innerHTML = `
@@ -1864,12 +1866,15 @@
                 .map(([mod, score]) => `<span class="meta-tag ${mod}">${mod}: ${score.toFixed(4)}</span>`)
                 .join('');
 
-            const confidencePercent = Math.round(result.fusion_score * 100);
+            // Use confidence_score (max modality match) if available, otherwise fusion_score
+            const confidenceScore = result.confidence_score !== undefined ? result.confidence_score : result.fusion_score;
+            const confidencePercent = Math.round(confidenceScore * 100);
 
             modalInfo.innerHTML = `
                 <span class="meta-tag">Segment: ${result.segment_id}</span>
                 <span class="meta-tag">Time: ${formatTime(result.start_time)} - ${formatTime(result.end_time)}</span>
-                <span class="meta-tag">Confidence: ${confidencePercent}% (${result.fusion_score.toFixed(4)})</span>
+                <span class="meta-tag">Confidence: ${confidencePercent}% (${confidenceScore.toFixed(4)})</span>
+                <span class="meta-tag">Fusion: ${result.fusion_score.toFixed(4)}</span>
                 ${modalityScoresHtml}
             `;
 

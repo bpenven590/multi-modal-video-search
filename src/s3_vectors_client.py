@@ -656,6 +656,12 @@ class S3VectorsClient:
             # Normalize to 0-1 range
             item["fusion_score"] = min(1.0, raw_rrf / max_rrf_score)
 
+            # Confidence score = best modality match (for more representative UI display)
+            if item.get("modality_scores"):
+                item["confidence_score"] = max(item["modality_scores"].values())
+            else:
+                item["confidence_score"] = item["fusion_score"]
+
         return ranked[:limit]
 
     def _weighted_fusion(
@@ -703,6 +709,12 @@ class S3VectorsClient:
                 for m in searched_modalities
             )
             data["fusion_score"] = fusion_score
+
+            # Confidence score = best modality match (for more representative UI display)
+            if data["modality_scores"]:
+                data["confidence_score"] = max(data["modality_scores"].values())
+            else:
+                data["confidence_score"] = fusion_score
 
         ranked = sorted(
             segment_scores.values(),
