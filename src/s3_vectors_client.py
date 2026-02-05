@@ -175,7 +175,11 @@ class S3VectorsClient:
 
     def store_all_segments(self, video_id: str, segments: list, dual_write: bool = True) -> dict:
         """
-        Store all segments from a video processing result.
+        Store all segments from a video processing result using batched API calls.
+
+        This method batches put_vectors calls (up to 100 vectors per call) to dramatically
+        reduce API latency overhead. For example, 213 segments × 3 modalities × 2 (dual write)
+        = 1,278 vectors can be stored in ~13 batched calls instead of 1,278 individual calls.
 
         Args:
             video_id: Unique identifier for the video
@@ -193,24 +197,89 @@ class S3VectorsClient:
             "transcription_stored": 0
         }
 
+        # Collect all vectors to write, grouped by index
+        modality_vectors = {modality: [] for modality in self.MODALITY_TYPES}
+        unified_vectors = []
+
+        # Build up vector lists for batching
         for segment in segments:
-            status = self.store_segment_embeddings(
-                video_id=video_id,
-                segment_id=segment["segment_id"],
-                s3_uri=segment["s3_uri"],
-                start_time=segment["start_time"],
-                end_time=segment["end_time"],
-                embeddings=segment.get("embeddings", {}),
-                dual_write=dual_write  # Enable dual storage
-            )
+            segment_id = segment["segment_id"]
+            s3_uri = segment["s3_uri"]
+            start_time = segment["start_time"]
+            end_time = segment["end_time"]
+            embeddings = segment.get("embeddings", {})
 
             results["segments_processed"] += 1
-            if status.get("visual") == "success":
-                results["visual_stored"] += 1
-            if status.get("audio") == "success":
-                results["audio_stored"] += 1
-            if status.get("transcription") == "success":
-                results["transcription_stored"] += 1
+
+            # Add to modality-specific index vectors
+            for modality in self.MODALITY_TYPES:
+                if modality not in embeddings or not embeddings[modality]:
+                    continue
+
+                vector_key = f"{video_id}_{segment_id}"
+                modality_vectors[modality].append({
+                    "key": vector_key,
+                    "data": {"float32": embeddings[modality]},
+                    "metadata": {
+                        "video_id": video_id,
+                        "segment_id": str(segment_id),
+                        "s3_uri": s3_uri,
+                        "start_time": str(start_time),
+                        "end_time": str(end_time)
+                    }
+                })
+
+                # Also add to unified index if dual_write enabled
+                if dual_write:
+                    unified_key = f"{video_id}_{segment_id}_{modality}"
+                    unified_vectors.append({
+                        "key": unified_key,
+                        "data": {"float32": embeddings[modality]},
+                        "metadata": {
+                            "video_id": video_id,
+                            "segment_id": str(segment_id),
+                            "modality_type": modality,
+                            "s3_uri": s3_uri,
+                            "start_time": str(start_time),
+                            "end_time": str(end_time)
+                        }
+                    })
+
+        # Write modality-specific indexes in batches of 100
+        for modality in self.MODALITY_TYPES:
+            vectors = modality_vectors[modality]
+            if not vectors:
+                continue
+
+            index_name = self.INDEX_NAMES[modality]
+            batch_size = 100
+
+            # Split into batches and write
+            for i in range(0, len(vectors), batch_size):
+                batch = vectors[i:i + batch_size]
+                try:
+                    self.client.put_vectors(
+                        vectorBucketName=self.bucket_name,
+                        indexName=index_name,
+                        vectors=batch
+                    )
+                    results[f"{modality}_stored"] += len(batch)
+                except Exception as e:
+                    print(f"Error writing {modality} batch {i//batch_size + 1}: {e}")
+
+        # Write unified index in batches of 100
+        if dual_write and unified_vectors:
+            batch_size = 100
+            for i in range(0, len(unified_vectors), batch_size):
+                batch = unified_vectors[i:i + batch_size]
+                try:
+                    self.client.put_vectors(
+                        vectorBucketName=self.bucket_name,
+                        indexName=self.UNIFIED_INDEX_NAME,
+                        vectors=batch
+                    )
+                except Exception as e:
+                    print(f"Error writing unified batch {i//batch_size + 1}: {e}")
 
         return results
 

@@ -195,6 +195,7 @@ echo_info "Copying source files..."
 cp "$SRC_DIR/lambda_function.py" "$PACKAGE_DIR/"
 cp "$SRC_DIR/bedrock_client.py" "$PACKAGE_DIR/"
 cp "$SRC_DIR/mongodb_client.py" "$PACKAGE_DIR/"
+cp "$SRC_DIR/s3_vectors_client.py" "$PACKAGE_DIR/"
 
 # Create ZIP file
 echo_info "Creating deployment package..."
@@ -230,7 +231,7 @@ if ! $UPDATE_MODE; then
             --zip-file "fileb://$BUILD_DIR/lambda-package.zip" \
             --timeout "$TIMEOUT" \
             --memory-size "$MEMORY_SIZE" \
-            --environment "Variables={MONGODB_URI=$MONGODB_URI,MONGODB_DATABASE=${MONGODB_DATABASE:-video_search}}" \
+            --environment "Variables={MONGODB_URI=$MONGODB_URI,MONGODB_DATABASE=${MONGODB_DATABASE:-video_search},S3_VECTORS_BUCKET=brice-video-search-multimodal}" \
             --region "$AWS_REGION" \
             --output text > /dev/null
     fi
@@ -252,7 +253,7 @@ else
         --function-name "$LAMBDA_FUNCTION_NAME" \
         --timeout "$TIMEOUT" \
         --memory-size "$MEMORY_SIZE" \
-        --environment "Variables={MONGODB_URI=$MONGODB_URI,MONGODB_DATABASE=${MONGODB_DATABASE:-video_search}}" \
+        --environment "Variables={MONGODB_URI=$MONGODB_URI,MONGODB_DATABASE=${MONGODB_DATABASE:-video_search},S3_VECTORS_BUCKET=brice-video-search-multimodal}" \
         --region "$AWS_REGION" \
         --output text > /dev/null
 fi
