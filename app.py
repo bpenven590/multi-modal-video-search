@@ -152,59 +152,77 @@ async def search(request: SearchRequest):
     - **video_id**: Filter by specific video
     - **use_decomposition**: Use LLM to decompose query per modality
     """
-    client = get_search_client()
+    try:
+        client = get_search_client()
 
-    # LLM Query Decomposition (if enabled)
-    decomposed_queries = None
-    if request.use_decomposition:
-        decomposed_queries = client.bedrock.decompose_query(request.query)
+        # LLM Query Decomposition (if enabled)
+        decomposed_queries = None
+        if request.use_decomposition:
+            decomposed_queries = client.bedrock.decompose_query(request.query)
 
-    # Get query embedding for code inspection
-    query_embedding_result = client.bedrock.get_text_query_embedding(request.query)
-    query_embedding = query_embedding_result.get("embedding", [])
+        # Get query embedding for code inspection
+        query_embedding_result = client.bedrock.get_text_query_embedding(request.query)
+        query_embedding = query_embedding_result.get("embedding", [])
+    except Exception as e:
+        print(f"Search error (initialization): {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
 
-    results = client.search(
-        query=request.query,
-        modalities=request.modalities,
-        weights=request.weights,
-        limit=request.limit,
-        video_id=request.video_id,
-        fusion_method=request.fusion_method,
-        backend=request.backend,  # Pass backend selection
-        use_multi_index=request.use_multi_index,  # Pass index mode
-        return_embeddings=True,  # Request embeddings in results
-        decomposed_queries=decomposed_queries  # Pass decomposed queries if available
-    )
+    try:
+        results = client.search(
+            query=request.query,
+            modalities=request.modalities,
+            weights=request.weights,
+            limit=request.limit,
+            video_id=request.video_id,
+            fusion_method=request.fusion_method,
+            backend=request.backend,  # Pass backend selection
+            use_multi_index=request.use_multi_index,  # Pass index mode
+            return_embeddings=True,  # Request embeddings in results
+            decomposed_queries=decomposed_queries  # Pass decomposed queries if available
+        )
+    except Exception as e:
+        print(f"Search error (backend): {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
 
-    # Add CloudFront URLs for fast video playback
-    for result in results:
-        s3_uri = result["s3_uri"]
-        parsed = urlparse(s3_uri)
-        key = parsed.path.lstrip("/")
+    try:
+        # Add CloudFront URLs for fast video playback
+        for result in results:
+            s3_uri = result["s3_uri"]
+            parsed = urlparse(s3_uri)
+            key = parsed.path.lstrip("/")
 
-        # Use proxy folder for faster video delivery (480p, ~90MB vs ~1.5GB)
-        # Check if already in proxy folder to avoid double proxy path
-        if "/proxy/" in key:
-            proxy_key = key
-        else:
-            proxy_key = key.replace("WBD_project/Videos/", "WBD_project/Videos/proxy/")
-        result["video_url"] = f"https://{CLOUDFRONT_DOMAIN}/{proxy_key}"
+            # Use proxy folder for faster video delivery (480p, ~90MB vs ~1.5GB)
+            # Check if already in proxy folder to avoid double proxy path
+            if "/proxy/" in key:
+                proxy_key = key
+            else:
+                proxy_key = key.replace("WBD_project/Videos/", "WBD_project/Videos/proxy/")
+            result["video_url"] = f"https://{CLOUDFRONT_DOMAIN}/{proxy_key}"
 
-        # Thumbnail URL (we'll generate these separately)
-        result["thumbnail_url"] = f"/api/thumbnail/{result['video_id']}/{result['segment_id']}"
+            # Thumbnail URL (we'll generate these separately)
+            result["thumbnail_url"] = f"/api/thumbnail/{result['video_id']}/{result['segment_id']}"
 
-    response = {
-        "results": results,
-        "query_embeddings": {
-            "combined": query_embedding  # 512d vector
+        response = {
+            "results": results,
+            "query_embeddings": {
+                "combined": query_embedding  # 512d vector
+            }
         }
-    }
 
-    # Include decomposed queries if enabled
-    if decomposed_queries:
-        response["decomposed_queries"] = decomposed_queries
+        # Include decomposed queries if enabled
+        if decomposed_queries:
+            response["decomposed_queries"] = decomposed_queries
 
-    return response
+        return response
+    except Exception as e:
+        print(f"Search error (results processing): {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
 
 
 @app.get("/api/search")
@@ -238,55 +256,61 @@ async def search_dynamic(request: SearchRequest):
     - **temperature**: Softmax temperature (default 10.0, higher = more uniform)
     - **use_decomposition**: Use LLM to decompose query per modality
     """
-    client = get_search_client()
+    try:
+        client = get_search_client()
 
-    # LLM Query Decomposition (if enabled)
-    decomposed_queries = None
-    if request.use_decomposition:
-        decomposed_queries = client.bedrock.decompose_query(request.query)
+        # LLM Query Decomposition (if enabled)
+        decomposed_queries = None
+        if request.use_decomposition:
+            decomposed_queries = client.bedrock.decompose_query(request.query)
 
-    response = client.search_dynamic(
-        query=request.query,
-        limit=request.limit,
-        video_id=request.video_id,
-        temperature=request.temperature,
-        backend=request.backend,  # Pass backend selection
-        use_multi_index=request.use_multi_index,  # Pass index mode
-        return_embeddings=True,
-        decomposed_queries=decomposed_queries
-    )
+        response = client.search_dynamic(
+            query=request.query,
+            limit=request.limit,
+            video_id=request.video_id,
+            temperature=request.temperature,
+            backend=request.backend,  # Pass backend selection
+            use_multi_index=request.use_multi_index,  # Pass index mode
+            return_embeddings=True,
+            decomposed_queries=decomposed_queries
+        )
 
-    results = response["results"]
-    query_embedding = response.get("query_embedding", [])
+        results = response["results"]
+        query_embedding = response.get("query_embedding", [])
 
-    # Add CloudFront URLs for fast video playback
-    for result in results:
-        s3_uri = result["s3_uri"]
-        parsed = urlparse(s3_uri)
-        key = parsed.path.lstrip("/")
+        # Add CloudFront URLs for fast video playback
+        for result in results:
+            s3_uri = result["s3_uri"]
+            parsed = urlparse(s3_uri)
+            key = parsed.path.lstrip("/")
 
-        # Check if already in proxy folder to avoid double proxy path
-        if "/proxy/" in key:
-            proxy_key = key
-        else:
-            proxy_key = key.replace("WBD_project/Videos/", "WBD_project/Videos/proxy/")
-        result["video_url"] = f"https://{CLOUDFRONT_DOMAIN}/{proxy_key}"
-        result["thumbnail_url"] = f"/api/thumbnail/{result['video_id']}/{result['segment_id']}"
+            # Check if already in proxy folder to avoid double proxy path
+            if "/proxy/" in key:
+                proxy_key = key
+            else:
+                proxy_key = key.replace("WBD_project/Videos/", "WBD_project/Videos/proxy/")
+            result["video_url"] = f"https://{CLOUDFRONT_DOMAIN}/{proxy_key}"
+            result["thumbnail_url"] = f"/api/thumbnail/{result['video_id']}/{result['segment_id']}"
 
-    api_response = {
-        "results": results,
-        "computed_weights": response["weights"],
-        "anchor_similarities": response["similarities"],
-        "query_embeddings": {
-            "combined": query_embedding
+        api_response = {
+            "results": results,
+            "computed_weights": response["weights"],
+            "anchor_similarities": response["similarities"],
+            "query_embeddings": {
+                "combined": query_embedding
+            }
         }
-    }
 
-    # Include decomposed queries if enabled
-    if decomposed_queries:
-        api_response["decomposed_queries"] = decomposed_queries
+        # Include decomposed queries if enabled
+        if decomposed_queries:
+            api_response["decomposed_queries"] = decomposed_queries
 
-    return api_response
+        return api_response
+    except Exception as e:
+        print(f"Dynamic search error: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
 
 
 @app.get("/api/videos")
