@@ -421,9 +421,16 @@ class S3VectorsClient:
             reverse=True
         )
 
+        # Normalize RRF scores to 0-1 range for better interpretability
+        # Maximum possible RRF score is when all ranks = 1
+        total_weight = sum(weights.values())
+        max_rrf_score = total_weight / (self.RRF_K + 1)
+
         # Normalize and rename for API consistency
         for item in ranked:
-            item["fusion_score"] = item.pop("rrf_score")
+            raw_rrf = item.pop("rrf_score")
+            # Normalize to 0-1 range
+            item["fusion_score"] = min(1.0, raw_rrf / max_rrf_score)
 
         return ranked[:limit]
 
