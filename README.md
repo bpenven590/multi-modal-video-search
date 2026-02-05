@@ -8,30 +8,6 @@ A production-grade video semantic search pipeline implementing the [TwelveLabs M
 
 ---
 
-## 📚 Implementation Coverage
-
-This project implements the comprehensive multi-vector search approaches from the TwelveLabs whitepaper:
-
-### ✅ Implemented
-
-| Whitepaper Section | Approach | Status | Location |
-|-------------------|----------|--------|----------|
-| **Section 3** | Multi-Vector Retrieval | ✅ Complete | `search_client.py` |
-| **Section 3.2.2** | Query Decomposition (LLM) | ✅ Complete | `bedrock_client.py:256` |
-| **Section 3.2.3** | Reciprocal Rank Fusion (RRF) | ✅ Complete | `search_client.py:301` |
-| **Section 3.2.3** | Weighted Score Fusion | ✅ Complete | `search_client.py:359` |
-| **Section 4.1** | Fixed Weights (Statistical Optimization) | ✅ Complete | Configurable via env vars |
-| **Section 4.3** | Intent-Based Dynamic Routing | ✅ Complete | `search_client.py:408` |
-
-### ❌ Not Implemented
-
-| Whitepaper Section | Approach | Why Not Implemented |
-|-------------------|----------|---------------------|
-| **Section 2** | Fused Embeddings (at ingestion) | Trade-off: Less flexible, irreversible fusion. Current approach (query-time fusion) provides better debuggability and adaptability. |
-| **Section 4.2** | Specialized ML Router | Requires custom model training, labeled data, and ongoing maintenance. Intent-based routing (4.3) provides similar benefits with lower operational overhead. |
-
----
-
 ## 🎯 Multi-Vector Search Approaches
 
 ### Approach: Multi-Vector Retrieval (Section 3)
