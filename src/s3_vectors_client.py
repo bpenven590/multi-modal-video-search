@@ -14,8 +14,8 @@ from typing import Optional, List
 from datetime import datetime
 
 
-# AWS Profile for SSO authentication
-AWS_PROFILE = os.environ.get("AWS_PROFILE", "TlFullDevelopmentAccess-026090552520")
+# AWS Profile for SSO authentication (local dev only, App Runner uses IAM roles)
+AWS_PROFILE = os.environ.get("AWS_PROFILE")
 
 
 class S3VectorsClient:
@@ -61,13 +61,17 @@ class S3VectorsClient:
         self.bucket_name = bucket_name
         self.region = region
 
-        # Use profile for SSO authentication
+        # Use profile for SSO authentication (local dev) or default credentials (App Runner)
         profile = profile_name or AWS_PROFILE
-        try:
-            session = boto3.Session(profile_name=profile)
-            self.client = session.client("s3vectors", region_name=region)
-        except Exception:
-            # Fall back to default credentials if profile fails
+        if profile:
+            try:
+                session = boto3.Session(profile_name=profile)
+                self.client = session.client("s3vectors", region_name=region)
+            except Exception:
+                # Fall back to default credentials if profile fails
+                self.client = boto3.client("s3vectors", region_name=region)
+        else:
+            # No profile specified - use default credentials (IAM role on App Runner)
             self.client = boto3.client("s3vectors", region_name=region)
 
     def store_segment_embeddings(

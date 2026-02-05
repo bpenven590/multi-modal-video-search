@@ -36,10 +36,14 @@ def migrate():
     db = mongo_client["video_search"]
     collection = db["video_embeddings"]
 
-    # Connect to S3 Vectors using SSO profile
+    # Connect to S3 Vectors using SSO profile (for local dev)
     print("Connecting to S3 Vectors...")
-    session = boto3.Session(profile_name="TlFullDevelopmentAccess-026090552520")
-    s3v_client = session.client("s3vectors", region_name=AWS_REGION)
+    aws_profile = os.environ.get("AWS_PROFILE", "TlFullDevelopmentAccess-026090552520")
+    if aws_profile:
+        session = boto3.Session(profile_name=aws_profile)
+        s3v_client = session.client("s3vectors", region_name=AWS_REGION)
+    else:
+        s3v_client = boto3.client("s3vectors", region_name=AWS_REGION)
 
     # Get total count per modality
     print("\nCounting documents in MongoDB...")
