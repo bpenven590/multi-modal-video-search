@@ -249,6 +249,38 @@
             font-weight: 600;
         }
 
+        .rank-badge {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            background: rgba(229, 231, 235, 0.95);
+            color: #1a1a2e;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            min-width: 28px;
+            text-align: center;
+        }
+
+        .confidence-badge {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: rgba(75, 85, 99, 0.95);
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+
+        .confidence-value {
+            color: #fff;
+        }
+
         .card-info {
             padding: 1rem;
         }
@@ -888,7 +920,7 @@
 
                 if (currentMode === 'dynamic') {
                     // Dynamic intent-based routing
-                    const request = { query, limit: 50, use_multi_index: useMultiIndex };
+                    const request = { query, limit: 20, use_multi_index: useMultiIndex };
                     const response = await fetch('/api/search/dynamic', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -905,7 +937,7 @@
                     // RRF or Weighted fusion
                     const request = {
                         query,
-                        limit: 50,
+                        limit: 20,
                         fusion_method: currentMode === 'rrf' ? 'rrf' : 'weighted',
                         use_multi_index: useMultiIndex
                     };
@@ -936,7 +968,7 @@
                     // Single modality search (visual, audio, transcription)
                     const request = {
                         query,
-                        limit: 50,
+                        limit: 20,
                         modalities: [currentMode],
                         fusion_method: 'weighted',
                         use_multi_index: useMultiIndex
@@ -1026,6 +1058,10 @@
                     ? `<span class="dominant-indicator ${dominantModality}">${dominantModality.substring(0, 3)}</span>`
                     : '';
 
+                // Calculate rank and confidence percentage
+                const rank = index + 1;
+                const confidencePercent = Math.round(result.fusion_score * 100);
+
                 // Create card with video thumbnail
                 card.innerHTML = `
                     <div class="thumbnail-container">
@@ -1049,7 +1085,10 @@
                                 <polygon points="5 3 19 12 5 21 5 3"></polygon>
                             </svg>
                         </div>
-                        <span class="score-badge">${result.fusion_score.toFixed(3)}</span>
+                        <span class="rank-badge">#${rank}</span>
+                        <span class="confidence-badge">
+                            <span class="confidence-value">${confidencePercent}%</span>
+                        </span>
                         ${dominantIndicator}
                         <span class="duration-badge">${startTime} - ${endTime}</span>
                     </div>
@@ -1142,10 +1181,12 @@
                 .map(([mod, score]) => `<span class="meta-tag ${mod}">${mod}: ${score.toFixed(4)}</span>`)
                 .join('');
 
+            const confidencePercent = Math.round(result.fusion_score * 100);
+
             modalInfo.innerHTML = `
                 <span class="meta-tag">Segment: ${result.segment_id}</span>
                 <span class="meta-tag">Time: ${formatTime(result.start_time)} - ${formatTime(result.end_time)}</span>
-                <span class="meta-tag">Fusion Score: ${result.fusion_score.toFixed(4)}</span>
+                <span class="meta-tag">Confidence: ${confidencePercent}% (${result.fusion_score.toFixed(4)})</span>
                 ${modalityScoresHtml}
             `;
 
