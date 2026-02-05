@@ -11,6 +11,7 @@ Text/image queries use sync invocation (InvokeModel).
 import json
 import os
 import time
+from functools import lru_cache
 from typing import Optional, Callable, Any
 import boto3
 from botocore.config import Config
@@ -109,6 +110,12 @@ class BedrockMarengoClient:
         else:
             sts_client = boto3.client("sts", config=config)
             self.account_id = sts_client.get_caller_identity()["Account"]
+
+        # Embedding cache to avoid redundant API calls
+        # Cache key: query text -> embedding vector
+        # Limited to 1000 entries to prevent unbounded memory growth
+        self._embedding_cache = {}
+        self._cache_max_size = 1000
 
     def get_video_embeddings(
         self,
@@ -280,12 +287,20 @@ class BedrockMarengoClient:
         """
         Generate embedding for a text query (synchronous).
 
+        Embeddings are cached by query text to avoid redundant API calls.
+        When switching between fusion methods, backends, or index modes with
+        the same query, the cached embedding is reused.
+
         Args:
             query_text: The search query text
 
         Returns:
             Dictionary containing the query embedding (512 dimensions)
         """
+        # Check cache first
+        if query_text in self._embedding_cache:
+            return self._embedding_cache[query_text]
+
         # Marengo 3.0 text format - no embeddingOption for text queries
         request_body = {
             "inputType": "text",
@@ -313,10 +328,21 @@ class BedrockMarengoClient:
         else:
             embedding = response_body.get("embedding", [])
 
-        return {
+        result = {
             "embedding": embedding,
             "input_text": query_text
         }
+
+        # Cache the result (with size limit to prevent unbounded growth)
+        if len(self._embedding_cache) >= self._cache_max_size:
+            # Simple FIFO eviction: remove oldest 10% of entries
+            keys_to_remove = list(self._embedding_cache.keys())[:100]
+            for key in keys_to_remove:
+                del self._embedding_cache[key]
+
+        self._embedding_cache[query_text] = result
+
+        return result
 
     def decompose_query(self, query_text: str) -> dict:
         """
