@@ -220,15 +220,39 @@ class VideoSearchClient:
         if weights is None:
             weights = self.DEFAULT_WEIGHTS.copy()
 
-        # Generate query embedding
-        query_result = self.bedrock.get_text_query_embedding(query)
-        query_embedding = query_result["embedding"]
+        # Generate query embeddings (per modality if decomposed, otherwise shared)
+        query_embeddings = {}
 
-        if not query_embedding:
-            return []
+        if decomposed_queries:
+            # Use decomposed queries to generate separate embeddings per modality
+            print("Using LLM-decomposed queries:")
+            for modality in modalities:
+                decomposed_query = decomposed_queries.get(modality, query)
+                print(f"  {modality}: {decomposed_query}")
+                result = self.bedrock.get_text_query_embedding(decomposed_query)
+                query_embeddings[modality] = result["embedding"]
+        else:
+            # Use same query embedding for all modalities
+            query_result = self.bedrock.get_text_query_embedding(query)
+            shared_embedding = query_result["embedding"]
+
+            if not shared_embedding:
+                return []
+
+            for modality in modalities:
+                query_embeddings[modality] = shared_embedding
 
         # Use S3 Vectors for multi-index mode
         if use_multi_index:
+            # For multi-index with decomposition, we need to search each modality separately
+            if decomposed_queries:
+                # TODO: Implement multi-index search with decomposed queries
+                # For now, fall back to using the original query embedding
+                query_result = self.bedrock.get_text_query_embedding(query)
+                query_embedding = query_result["embedding"]
+            else:
+                query_embedding = query_embeddings[modalities[0]]
+
             s3v_client = self.get_s3_vectors_client()
             return s3v_client.search_with_fusion(
                 query_embedding=query_embedding,
@@ -245,6 +269,11 @@ class VideoSearchClient:
         for modality in modalities:
             weight = weights.get(modality, 1.0)
             if weight == 0:
+                continue
+
+            # Use modality-specific query embedding
+            query_embedding = query_embeddings.get(modality)
+            if not query_embedding:
                 continue
 
             collection = self.collection

@@ -274,78 +274,81 @@ class BedrockMarengoClient:
                 "transcription": str
             }
         """
-        prompt = f"""You are a video search query decomposer for multi-modal video search. Your task is to extract and assign different parts of the query to the appropriate modality.
+        prompt = f"""You are a video search query decomposer. Your task is to split a user's search query into THREE different modality-specific queries.
 
-Given this search query: "{query_text}"
+Original query: "{query_text}"
 
-Decompose it into THREE modality-specific queries by extracting relevant parts:
+CRITICAL: Each modality query MUST be different from the others. DO NOT repeat the same text.
 
-1. VISUAL query: Extract visual elements (what appears on screen)
-   - Include: people, objects, scenes, actions, settings, visual elements
-   - Remove: audio descriptions and speech content
+Generate THREE DISTINCT queries:
 
-2. AUDIO query: Extract audio elements (NON-SPEECH sounds only)
-   - Include: music, sound effects, ambient sounds, background audio
-   - Remove: visual elements and speech content
+1. VISUAL query - What appears ON SCREEN:
+   - Focus on: people, objects, scenes, actions, clothing, colors, settings
+   - Extract visual elements from the original query
+   - Expand with relevant visual context if needed
 
-3. TRANSCRIPTION query: Extract speech content (what is spoken/said)
-   - Include: dialogue, narration, spoken words, verbal content
-   - Remove: visual elements and non-speech audio
+2. AUDIO query - NON-SPEECH sounds ONLY:
+   - Focus on: music, sound effects, ambient noise, background audio
+   - Extract audio elements from the original query
+   - If no audio mentioned, infer relevant sounds for the scene
 
-APPROACH:
-- PRIMARY: Extract and assign parts of the original query to the appropriate modality
-- SECONDARY: If a modality isn't explicitly mentioned, expand naturally based on context
-- DO NOT just repeat the same query three times
-- DO NOT invent content that contradicts the original query
+3. TRANSCRIPTION query - SPOKEN WORDS:
+   - Focus on: dialogue, narration, speech, what people say
+   - Extract speech/text elements from the original query
+   - If no speech mentioned, infer what might be discussed
 
-Examples:
+EXAMPLES:
 
-Query: "A basketball player dunking in an empty stadium with beats playing in the background while a narrator discusses the importance of high school basketball programs"
+Input: "A basketball player dunking in an empty stadium with beats playing in the background while a narrator discusses the importance of high school basketball programs"
+Output:
 {{
     "visual": "basketball player dunking in an empty stadium",
     "audio": "beats playing in the background",
     "transcription": "narrator discusses the importance of high school basketball programs"
 }}
 
-Query: "explosion scene with loud bang"
+Input: "Ross says I take thee Rachel at a wedding"
+Output:
 {{
-    "visual": "explosion, fire, debris, smoke",
-    "audio": "loud bang, explosion sound",
-    "transcription": "talking about explosion"
-}}
-
-Query: "Ross says I take thee Rachel at a wedding"
-{{
-    "visual": "Ross at a wedding ceremony, wedding scene",
-    "audio": "wedding music, ceremony sounds",
+    "visual": "Ross at a wedding ceremony, wedding altar, formal attire",
+    "audio": "wedding music, ceremony sounds, emotional atmosphere",
     "transcription": "Ross says I take thee Rachel"
 }}
 
-Query: "person laughing at a joke"
+Input: "explosion scene"
+Output:
 {{
-    "visual": "person laughing, smiling",
-    "audio": "laughter sounds, giggling",
-    "transcription": "telling a joke, funny conversation"
+    "visual": "explosion, fire, debris, smoke, destruction",
+    "audio": "loud bang, explosion sound, rumbling",
+    "transcription": "describing explosion, emergency response"
 }}
 
-Now decompose: "{query_text}"
-
-Respond in JSON format ONLY:
+Input: "person laughing"
+Output:
 {{
-    "visual": "extracted visual elements",
-    "audio": "extracted audio elements (non-speech)",
-    "transcription": "extracted speech/dialogue content"
+    "visual": "person laughing, smiling face, happy expression",
+    "audio": "laughter sounds, giggling, chuckling",
+    "transcription": "telling jokes, humorous conversation"
+}}
+
+Now decompose this query: "{query_text}"
+
+Return ONLY valid JSON in this exact format:
+{{
+    "visual": "your visual query here",
+    "audio": "your audio query here",
+    "transcription": "your transcription query here"
 }}"""
 
         try:
             response = self.bedrock_client.invoke_model(
-                modelId="us.anthropic.claude-haiku-4-5-20250929-v1:0",
+                modelId="anthropic.claude-3-haiku-20240307-v1:0",
                 contentType="application/json",
                 accept="application/json",
                 body=json.dumps({
                     "anthropic_version": "bedrock-2023-05-31",
                     "max_tokens": 500,
-                    "temperature": 0.7,
+                    "temperature": 0.3,
                     "messages": [
                         {
                             "role": "user",
