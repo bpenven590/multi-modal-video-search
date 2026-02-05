@@ -1,6 +1,6 @@
 # Multi-Vector Video Search Pipeline
 
-A production-grade video semantic search pipeline built with AWS Bedrock Marengo 3.0, featuring dual vector storage backends: **MongoDB Atlas** and **Amazon S3 Vectors**.
+A video semantic search pipeline built with AWS Bedrock Marengo 3.0, featuring dual vector storage backends: **MongoDB Atlas** and **Amazon S3 Vectors**.
 
 ---
 
@@ -929,87 +929,4 @@ print(decomposed)
 | `WEIGHT_TRANSCRIPTION` | `0.1` | Default transcription weight (fixed mode) |
 
 ---
-
-## 🐛 Troubleshooting
-
-### S3 Vectors Scores Much Lower Than MongoDB (FIXED)
-
-**Issue:** S3 Vectors returned scores 69-72% lower than MongoDB for identical queries.
-
-**Root Cause:** S3 Vectors API returns **squared Euclidean distance** for normalized vectors, not cosine distance.
-
-**Solution (2026-02-05):**
-```python
-# Old (WRONG):
-score = 1 - distance
-
-# New (CORRECT):
-score = 1 - (distance / 2)
-```
-
-**Why:** For normalized vectors: `squared_euclidean = 2 * (1 - cosine_similarity)`
-
-**Verification:** Scores now match MongoDB within 0.2% floating-point precision.
-
-**File:** [src/s3_vectors_client.py:337](src/s3_vectors_client.py#L337)
-
-### 500 Internal Server Errors
-
-**Fixed in latest version (2026-02-05):**
-- ✅ Transient Bedrock API errors (ModelErrorException) now automatically retry
-- ✅ Empty dynamic weight calculation no longer crashes
-- ✅ Weighted fusion normalization bug fixed
-
-If you still see errors:
-1. Check App Runner logs: `aws logs tail /aws/apprunner/video-search/.../application --follow`
-2. Verify AWS Bedrock permissions: `bedrock:InvokeModel`
-3. Ensure MongoDB connection string is valid
-
-### Confidence Scores Not Representative
-
-**Fixed in latest version (2026-02-05):**
-- ✅ Confidence now shows `max(modality_scores)` instead of weighted fusion
-- ✅ Example: 77% transcription match now displays as 77% confidence (not 20%)
-- ✅ Fusion score still used for ranking (unchanged)
-
-**Why the change:**
-- Weighted fusion can dilute high-scoring modalities (e.g., transcription weight = 0.05)
-- Users see more honest representation of match quality
-- Ranking algorithm unchanged - only display metric affected
-
-For best results:
-- Use **Dynamic mode** for mixed queries (visual + audio + transcription)
-- Use **Weighted mode** with adjusted sliders for specific modality focus
-- Enable **LLM Decomposition** for complex multi-modal queries
-
-### Lambda Timeout
-
-- Default timeout is 15 minutes (900 seconds)
-- For very long videos (>2 hours), consider splitting into segments
-- Increase memory to 2048MB or higher for faster processing
-
-### Vector Search Returns No Results
-
-1. Verify index is in **Active** state in Atlas UI
-2. Check embedding dimensions match (512)
-3. Ensure collection has documents
-4. Verify filter field values match exactly
-
-**S3 Vectors Single-Index Mode Limitation:**
-- topK=100 API limit means semantically mismatched queries may not return all modalities
-- Example: Transcription query may only return transcription results (visual/audio rank too low)
-- **Solution:** Use multi-index mode for consistent multi-modality results
-
-### LLM Decomposition Fails
-
-1. Verify Bedrock access to Claude 3 Haiku model
-2. Check model ID is correct: `anthropic.claude-3-haiku-20240307-v1:0`
-3. Ensure AWS credentials have `bedrock:InvokeModel` permission
-4. Check CloudWatch logs for detailed error messages
-
-### Connection Errors
-
-1. Verify MongoDB Atlas IP whitelist includes Lambda/App Runner IPs
-2. Check connection string format
-3. For testing, use 0.0.0.0/0 in Atlas Network Access
 
