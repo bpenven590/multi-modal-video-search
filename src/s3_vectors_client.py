@@ -21,7 +21,10 @@ AWS_PROFILE = os.environ.get("AWS_PROFILE")
 class S3VectorsClient:
     """Client for storing and querying multi-modal embeddings in S3 Vectors."""
 
-    # Index names for each modality
+    # Unified index for all modalities (single-index mode)
+    UNIFIED_INDEX_NAME = "unified-embeddings"
+
+    # Index names for each modality (multi-index mode)
     INDEX_NAMES = {
         "visual": "visual-embeddings",
         "audio": "audio-embeddings",
@@ -81,10 +84,14 @@ class S3VectorsClient:
         s3_uri: str,
         start_time: float,
         end_time: float,
-        embeddings: dict
+        embeddings: dict,
+        dual_write: bool = True
     ) -> dict:
         """
-        Store embeddings for a video segment across modality-specific indexes.
+        Store embeddings for a video segment in S3 Vectors.
+
+        Supports dual-write mode: writes to both unified-embeddings index
+        and modality-specific indexes for single/multi-index search support.
 
         Args:
             video_id: Unique identifier for the video
@@ -93,12 +100,14 @@ class S3VectorsClient:
             start_time: Segment start time in seconds
             end_time: Segment end time in seconds
             embeddings: Dict containing 'visual', 'audio', and/or 'transcription' embeddings
+            dual_write: If True, write to both unified and modality-specific indexes
 
         Returns:
             Dictionary with status for each modality
         """
         results = {}
 
+        # Write to modality-specific indexes (multi-index mode)
         for modality in self.MODALITY_TYPES:
             if modality not in embeddings or not embeddings[modality]:
                 continue
@@ -112,7 +121,7 @@ class S3VectorsClient:
                 "data": {"float32": embeddings[modality]},
                 "metadata": {
                     "video_id": video_id,
-                    "segment_id": str(segment_id),  # S3 Vectors metadata values are strings
+                    "segment_id": str(segment_id),
                     "s3_uri": s3_uri,
                     "start_time": str(start_time),
                     "end_time": str(end_time)
@@ -129,15 +138,49 @@ class S3VectorsClient:
             except Exception as e:
                 results[modality] = f"error: {str(e)}"
 
+        # Also write to unified index (single-index mode) if dual_write enabled
+        if dual_write:
+            for modality in self.MODALITY_TYPES:
+                if modality not in embeddings or not embeddings[modality]:
+                    continue
+
+                # Unique key for unified index includes modality
+                unified_key = f"{video_id}_{segment_id}_{modality}"
+
+                vector_data = {
+                    "key": unified_key,
+                    "data": {"float32": embeddings[modality]},
+                    "metadata": {
+                        "video_id": video_id,
+                        "segment_id": str(segment_id),
+                        "modality_type": modality,  # Important: filter by this
+                        "s3_uri": s3_uri,
+                        "start_time": str(start_time),
+                        "end_time": str(end_time)
+                    }
+                }
+
+                try:
+                    self.client.put_vectors(
+                        vectorBucketName=self.bucket_name,
+                        indexName=self.UNIFIED_INDEX_NAME,
+                        vectors=[vector_data]
+                    )
+                except Exception as e:
+                    # Don't overwrite success status if multi-index write succeeded
+                    if results.get(modality) == "success":
+                        results[f"{modality}_unified"] = f"error: {str(e)}"
+
         return results
 
-    def store_all_segments(self, video_id: str, segments: list) -> dict:
+    def store_all_segments(self, video_id: str, segments: list, dual_write: bool = True) -> dict:
         """
         Store all segments from a video processing result.
 
         Args:
             video_id: Unique identifier for the video
             segments: List of segment dictionaries from BedrockMarengoClient
+            dual_write: If True, write to both unified and modality-specific indexes
 
         Returns:
             Summary of stored segments
@@ -157,7 +200,8 @@ class S3VectorsClient:
                 s3_uri=segment["s3_uri"],
                 start_time=segment["start_time"],
                 end_time=segment["end_time"],
-                embeddings=segment.get("embeddings", {})
+                embeddings=segment.get("embeddings", {}),
+                dual_write=dual_write  # Enable dual storage
             )
 
             results["segments_processed"] += 1
@@ -238,7 +282,8 @@ class S3VectorsClient:
         query_embedding: list,
         limit_per_modality: int = 50,
         modalities: Optional[List[str]] = None,
-        video_id_filter: Optional[str] = None
+        video_id_filter: Optional[str] = None,
+        use_multi_index: bool = True
     ) -> dict:
         """
         Search across multiple modalities and return results grouped by modality.
@@ -248,6 +293,8 @@ class S3VectorsClient:
             limit_per_modality: Max results per modality
             modalities: List of modalities to search (default: all three)
             video_id_filter: Optional filter by video ID
+            use_multi_index: If True, use modality-specific indexes;
+                           if False, use unified index with metadata filtering
 
         Returns:
             Dictionary with results grouped by modality type
@@ -255,15 +302,100 @@ class S3VectorsClient:
         if modalities is None:
             modalities = self.MODALITY_TYPES
 
-        results = {}
-        for modality in modalities:
-            if modality in self.MODALITY_TYPES:
-                results[modality] = self.vector_search(
-                    query_embedding=query_embedding,
-                    modality=modality,
-                    limit=limit_per_modality,
-                    video_id_filter=video_id_filter
-                )
+        if use_multi_index:
+            # Use modality-specific indexes (multi-index mode)
+            results = {}
+            for modality in modalities:
+                if modality in self.MODALITY_TYPES:
+                    results[modality] = self.vector_search(
+                        query_embedding=query_embedding,
+                        modality=modality,
+                        limit=limit_per_modality,
+                        video_id_filter=video_id_filter
+                    )
+            return results
+        else:
+            # Use unified index with modality filtering (single-index mode)
+            return self.unified_multi_modality_search(
+                query_embedding=query_embedding,
+                limit_per_modality=limit_per_modality,
+                modalities=modalities,
+                video_id_filter=video_id_filter
+            )
+
+    def unified_multi_modality_search(
+        self,
+        query_embedding: list,
+        limit_per_modality: int = 50,
+        modalities: Optional[List[str]] = None,
+        video_id_filter: Optional[str] = None
+    ) -> dict:
+        """
+        Search across modalities using the unified index with metadata filtering.
+
+        Args:
+            query_embedding: Query embedding vector
+            limit_per_modality: Max results per modality
+            modalities: List of modalities to search
+            video_id_filter: Optional filter by video ID
+
+        Returns:
+            Dictionary with results grouped by modality type
+        """
+        if modalities is None:
+            modalities = self.MODALITY_TYPES
+
+        results = {modality: [] for modality in modalities}
+
+        # Query unified index (returns mixed modalities)
+        try:
+            # Get more results since we'll filter by modality
+            response = self.client.query_vectors(
+                vectorBucketName=self.bucket_name,
+                indexName=self.UNIFIED_INDEX_NAME,
+                queryVector={"float32": query_embedding},
+                topK=limit_per_modality * len(modalities) * 2,
+                returnMetadata=True,
+                returnDistance=True
+            )
+
+            # Group results by modality
+            modality_counts = {m: 0 for m in modalities}
+
+            for vector in response.get("vectors", []):
+                metadata = vector.get("metadata", {})
+                modality = metadata.get("modality_type", "")
+
+                # Skip if not in requested modalities
+                if modality not in modalities:
+                    continue
+
+                # Skip if already have enough for this modality
+                if modality_counts[modality] >= limit_per_modality:
+                    continue
+
+                # Apply video_id filter if specified
+                if video_id_filter and metadata.get("video_id") != video_id_filter:
+                    continue
+
+                results[modality].append({
+                    "video_id": metadata.get("video_id", ""),
+                    "segment_id": int(metadata.get("segment_id", 0)),
+                    "s3_uri": metadata.get("s3_uri", ""),
+                    "start_time": float(metadata.get("start_time", 0)),
+                    "end_time": float(metadata.get("end_time", 0)),
+                    "modality_type": modality,
+                    "score": 1 - vector.get("distance", 0)
+                })
+
+                modality_counts[modality] += 1
+
+                # Stop if all modalities have enough results
+                if all(count >= limit_per_modality for count in modality_counts.values()):
+                    break
+
+        except Exception as e:
+            print(f"S3 Vectors unified search error: {e}")
 
         return results
 
@@ -341,7 +473,8 @@ class S3VectorsClient:
         weights: Optional[dict] = None,
         limit: int = 50,
         video_id_filter: Optional[str] = None,
-        fusion_method: str = "rrf"
+        fusion_method: str = "rrf",
+        use_multi_index: bool = True
     ) -> list:
         """
         Search across modalities with fusion (RRF or weighted).
@@ -353,6 +486,7 @@ class S3VectorsClient:
             limit: Maximum results
             video_id_filter: Optional filter by video ID
             fusion_method: "rrf" or "weighted"
+            use_multi_index: True = modality-specific indexes, False = unified index
 
         Returns:
             List of fused results with fusion scores
@@ -368,7 +502,8 @@ class S3VectorsClient:
             query_embedding=query_embedding,
             limit_per_modality=limit * 2,
             modalities=modalities,
-            video_id_filter=video_id_filter
+            video_id_filter=video_id_filter,
+            use_multi_index=use_multi_index  # Pass index mode
         )
 
         # Apply fusion

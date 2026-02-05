@@ -70,7 +70,8 @@ class SearchRequest(BaseModel):
     video_id: Optional[str] = None
     fusion_method: str = "rrf"  # "rrf", "weighted", or "dynamic"
     temperature: Optional[float] = 10.0  # For dynamic mode
-    use_multi_index: bool = False  # True = separate collections, False = single with filter
+    backend: str = "s3vectors"  # "mongodb" or "s3vectors"
+    use_multi_index: bool = True  # True = modality-specific indexes, False = unified index
     use_decomposition: bool = False  # True = use LLM to decompose query per modality
 
 
@@ -169,7 +170,8 @@ async def search(request: SearchRequest):
         limit=request.limit,
         video_id=request.video_id,
         fusion_method=request.fusion_method,
-        use_multi_index=request.use_multi_index,
+        backend=request.backend,  # Pass backend selection
+        use_multi_index=request.use_multi_index,  # Pass index mode
         return_embeddings=True,  # Request embeddings in results
         decomposed_queries=decomposed_queries  # Pass decomposed queries if available
     )
@@ -244,7 +246,8 @@ async def search_dynamic(request: SearchRequest):
         limit=request.limit,
         video_id=request.video_id,
         temperature=request.temperature,
-        use_multi_index=request.use_multi_index,
+        backend=request.backend,  # Pass backend selection
+        use_multi_index=request.use_multi_index,  # Pass index mode
         return_embeddings=True,
         decomposed_queries=decomposed_queries
     )

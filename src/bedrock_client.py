@@ -73,7 +73,9 @@ class BedrockMarengoClient:
         bucket: str,
         s3_key: str,
         embedding_types: Optional[list] = None,
+        segmentation_method: str = "dynamic",
         segment_length_sec: int = 6,
+        min_duration_sec: int = 4,
         account_id: Optional[str] = None
     ) -> dict:
         """
@@ -83,9 +85,13 @@ class BedrockMarengoClient:
             bucket: S3 bucket name
             s3_key: S3 object key for the video file
             embedding_types: List of embedding types to generate.
-                           Options: ["visual", "audio"]
-                           Defaults to both.
-            segment_length_sec: Length of each segment in seconds (default: 6)
+                           Options: ["visual", "audio", "transcription"]
+                           Defaults to all three.
+            segmentation_method: Segmentation method ("fixed" or "dynamic")
+                               - "fixed": Fixed-length segments
+                               - "dynamic": Shot boundary detection (default)
+            segment_length_sec: Length of each segment in seconds for fixed method (default: 6)
+            min_duration_sec: Minimum segment duration for dynamic method (1-5 seconds, default: 4)
             account_id: AWS account ID for bucket owner (optional)
 
         Returns:
@@ -105,6 +111,25 @@ class BedrockMarengoClient:
         # Prepare the request payload for async invocation (Marengo 3.0 format)
         # Note: Marengo 3.0 uses nested "video" structure and requires bucketOwner
         bucket_owner = account_id or self.account_id
+
+        # Configure segmentation based on method
+        if segmentation_method == "dynamic":
+            # Dynamic shot boundary detection (1-5 seconds)
+            segmentation_config = {
+                "method": "dynamic",
+                "dynamic": {
+                    "minDurationSec": max(1, min(5, min_duration_sec))  # Clamp to valid range
+                }
+            }
+        else:
+            # Fixed-length segments
+            segmentation_config = {
+                "method": "fixed",
+                "fixed": {
+                    "durationSec": segment_length_sec
+                }
+            }
+
         model_input = {
             "inputType": "video",
             "video": {
@@ -114,12 +139,7 @@ class BedrockMarengoClient:
                         "bucketOwner": bucket_owner
                     }
                 },
-                "segmentation": {
-                    "method": "fixed",
-                    "fixed": {
-                        "durationSec": segment_length_sec
-                    }
-                },
+                "segmentation": segmentation_config,
                 "embeddingOption": embedding_types,
                 "embeddingScope": ["clip", "asset"]
             }

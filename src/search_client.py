@@ -22,6 +22,7 @@ from pymongo import MongoClient
 
 from bedrock_client import BedrockMarengoClient
 from s3_vectors_client import S3VectorsClient
+from mongodb_client import MongoDBEmbeddingClient
 
 
 # Anchor text prompts for dynamic intent routing (Section 4.3 of whitepaper)
@@ -103,11 +104,25 @@ class VideoSearchClient:
         # S3 Vectors client for multi-index mode (lazy initialized)
         self._s3_vectors_client = None
 
+        # MongoDB embedding client (lazy initialized)
+        self._mongodb_client = None
+        self._mongodb_uri = mongodb_uri
+        self._database_name = database_name
+
     def get_s3_vectors_client(self) -> S3VectorsClient:
         """Get or create the S3 Vectors client."""
         if self._s3_vectors_client is None:
             self._s3_vectors_client = S3VectorsClient()
         return self._s3_vectors_client
+
+    def get_mongodb_client(self) -> MongoDBEmbeddingClient:
+        """Get or create the MongoDB embedding client."""
+        if self._mongodb_client is None:
+            self._mongodb_client = MongoDBEmbeddingClient(
+                connection_string=self._mongodb_uri,
+                database_name=self._database_name
+            )
+        return self._mongodb_client
 
     def has_s3_vectors_backend(self) -> bool:
         """Check if S3 Vectors backend is available."""
@@ -192,7 +207,8 @@ class VideoSearchClient:
         video_id: Optional[str] = None,
         fusion_method: str = "rrf",  # "rrf", "weighted", or "dynamic"
         k_per_modality: int = 20,
-        use_multi_index: bool = False,  # True = S3 Vectors, False = MongoDB single-index
+        backend: str = "s3vectors",  # "mongodb" or "s3vectors"
+        use_multi_index: bool = True,  # True = multi-index, False = single unified index
         return_embeddings: bool = False,  # Include 512d embeddings in results
         decomposed_queries: Optional[dict] = None  # LLM-decomposed queries per modality
     ) -> list:
@@ -206,8 +222,8 @@ class VideoSearchClient:
             limit: Maximum results
             video_id: Optional filter by specific video
             fusion_method: "rrf" (Reciprocal Rank Fusion) or "weighted" (score sum)
-            use_multi_index: If True, use S3 Vectors (separate indexes per modality)
-                           If False, use MongoDB single collection with modality_type filter
+            backend: "mongodb" or "s3vectors"
+            use_multi_index: True = modality-specific indexes, False = unified index
             return_embeddings: If True, include 512d embedding vectors in results
             decomposed_queries: Optional dict with modality-specific queries
 
@@ -242,90 +258,54 @@ class VideoSearchClient:
             for modality in modalities:
                 query_embeddings[modality] = shared_embedding
 
-        # Use S3 Vectors for multi-index mode
-        if use_multi_index:
-            # For multi-index with decomposition, we need to search each modality separately
-            if decomposed_queries:
-                # TODO: Implement multi-index search with decomposed queries
-                # For now, fall back to using the original query embedding
-                query_result = self.bedrock.get_text_query_embedding(query)
-                query_embedding = query_result["embedding"]
-            else:
-                query_embedding = query_embeddings[modalities[0]]
-
+        # Route to correct backend
+        if backend == "s3vectors":
             s3v_client = self.get_s3_vectors_client()
             return s3v_client.search_with_fusion(
-                query_embedding=query_embedding,
+                query_embedding=query_embeddings[modalities[0]],  # TODO: Handle decomposed queries
                 modalities=modalities,
                 weights=weights,
                 limit=limit,
                 video_id_filter=video_id,
-                fusion_method=fusion_method
+                fusion_method=fusion_method,
+                use_multi_index=use_multi_index  # Pass index mode
             )
 
-        # MongoDB single-index mode
-        modality_results = {}
+        # MongoDB backend
+        elif backend == "mongodb":
+            # Use MongoDB client's multi_modality_search with use_multi_index parameter
+            mongo_client = self.get_mongodb_client()
 
-        for modality in modalities:
-            weight = weights.get(modality, 1.0)
-            if weight == 0:
-                continue
+            # For each modality, search with its specific embedding
+            modality_results = {}
+            for modality in modalities:
+                weight = weights.get(modality, 1.0)
+                if weight == 0:
+                    continue
 
-            # Use modality-specific query embedding
-            query_embedding = query_embeddings.get(modality)
-            if not query_embedding:
-                continue
+                query_embedding = query_embeddings.get(modality)
+                if not query_embedding:
+                    continue
 
-            collection = self.collection
-            filter_doc = {"modality_type": modality}
-            if video_id:
-                filter_doc["video_id"] = video_id
+                # Search this modality
+                results = mongo_client.multi_modality_search(
+                    query_embedding=query_embedding,
+                    limit_per_modality=limit * 2,
+                    modalities=[modality],
+                    video_id_filter=video_id,
+                    use_multi_index=use_multi_index
+                )
 
-            # Build projection fields
-            projection = {
-                "video_id": 1,
-                "start_time": 1,
-                "end_time": 1,
-                "s3_uri": 1,
-                "segment_id": 1,
-                "score": {"$meta": "vectorSearchScore"}
-            }
-            if return_embeddings:
-                projection["embedding"] = 1
+                modality_results[modality] = results.get(modality, [])
 
-            pipeline = [
-                {
-                    "$vectorSearch": {
-                        "index": self.index_name,
-                        "path": "embedding",
-                        "queryVector": query_embedding,
-                        "numCandidates": limit * 6,
-                        "limit": limit * 2,  # Get more candidates for fusion
-                        "filter": filter_doc if filter_doc else None
-                    }
-                },
-                {
-                    "$project": projection
-                }
-            ]
+            # Apply fusion
+            if fusion_method == "rrf":
+                return self._rrf_fusion(modality_results, weights, limit)
+            else:
+                return self._weighted_fusion(modality_results, weights, limit)
 
-            # Remove None filter if empty
-            if not filter_doc:
-                del pipeline[0]["$vectorSearch"]["filter"]
-
-            results = list(collection.aggregate(pipeline))
-
-            # Add modality_type back for consistency (needed for fusion)
-            for r in results:
-                r["modality_type"] = modality
-
-            modality_results[modality] = results
-
-        # Apply fusion
-        if fusion_method == "rrf":
-            return self._rrf_fusion(modality_results, weights, limit)
         else:
-            return self._weighted_fusion(modality_results, weights, limit)
+            raise ValueError(f"Invalid backend: {backend}")
 
     def _rrf_fusion(
         self,
@@ -447,7 +427,8 @@ class VideoSearchClient:
         limit: int = 50,
         video_id: Optional[str] = None,
         temperature: float = None,
-        use_multi_index: bool = False,
+        backend: str = "s3vectors",
+        use_multi_index: bool = True,
         return_embeddings: bool = False,
         decomposed_queries: Optional[dict] = None
     ) -> dict:
@@ -461,7 +442,8 @@ class VideoSearchClient:
             limit: Maximum results
             video_id: Optional filter by specific video
             temperature: Softmax temperature (higher = more uniform weights)
-            use_multi_index: If True, use S3 Vectors (separate indexes per modality)
+            backend: "mongodb" or "s3vectors"
+            use_multi_index: True = modality-specific indexes, False = unified index
             return_embeddings: If True, include 512d embedding vectors in results
             decomposed_queries: Optional dict with modality-specific queries
 

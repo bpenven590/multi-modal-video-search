@@ -21,8 +21,8 @@ from pymongo.database import Database
 class MongoDBEmbeddingClient:
     """Client for storing and querying multi-vector embeddings in MongoDB Atlas."""
 
-    # Single collection for all modalities
-    COLLECTION_NAME = "video_embeddings"
+    # Single collection for all modalities (unified-embeddings)
+    COLLECTION_NAME = "unified-embeddings"
 
     # Modality-specific collections for multi-index mode
     MODALITY_COLLECTIONS = {
@@ -31,8 +31,13 @@ class MongoDBEmbeddingClient:
         "transcription": "transcription_embeddings"
     }
 
-    # Vector index name
-    VECTOR_INDEX_NAME = "video_embeddings_vector_index"
+    # Vector index names
+    VECTOR_INDEX_NAME = "unified_embeddings_vector_index"  # For unified collection
+    MODALITY_INDEX_NAMES = {
+        "visual": "visual_embeddings_vector_index",
+        "audio": "audio_embeddings_vector_index",
+        "transcription": "transcription_embeddings_vector_index"
+    }
 
     # Valid modality types
     MODALITY_TYPES = ["visual", "audio", "transcription"]
@@ -143,13 +148,14 @@ class MongoDBEmbeddingClient:
 
         return inserted_ids
 
-    def store_all_segments(self, video_id: str, segments: list) -> dict:
+    def store_all_segments(self, video_id: str, segments: list, dual_write: bool = True) -> dict:
         """
         Store all segments from a video processing result.
 
         Args:
             video_id: Unique identifier for the video
             segments: List of segment dictionaries from BedrockMarengoClient
+            dual_write: If True, write to both unified and modality-specific collections
 
         Returns:
             Summary of stored segments
@@ -169,7 +175,8 @@ class MongoDBEmbeddingClient:
                 s3_uri=segment["s3_uri"],
                 start_time=segment["start_time"],
                 end_time=segment["end_time"],
-                embeddings=segment.get("embeddings", {})
+                embeddings=segment.get("embeddings", {}),
+                dual_write=dual_write  # Enable dual storage
             )
 
             results["segments_processed"] += 1
@@ -241,7 +248,8 @@ class MongoDBEmbeddingClient:
         query_embedding: list,
         limit_per_modality: int = 50,
         modalities: Optional[List[str]] = None,
-        video_id_filter: Optional[str] = None
+        video_id_filter: Optional[str] = None,
+        use_multi_index: bool = False
     ) -> dict:
         """
         Search across multiple modalities and return results grouped by modality.
@@ -251,6 +259,8 @@ class MongoDBEmbeddingClient:
             limit_per_modality: Max results per modality
             modalities: List of modalities to search (default: all three)
             video_id_filter: Optional filter by video ID
+            use_multi_index: If True, search modality-specific collections;
+                           if False, search unified collection with filters
 
         Returns:
             Dictionary with results grouped by modality type
@@ -259,14 +269,91 @@ class MongoDBEmbeddingClient:
             modalities = self.MODALITY_TYPES
 
         results = {}
-        for modality in modalities:
-            if modality in self.MODALITY_TYPES:
-                results[modality] = self.vector_search(
-                    query_embedding=query_embedding,
-                    limit=limit_per_modality,
-                    modality_filter=modality,
-                    video_id_filter=video_id_filter
-                )
+
+        if use_multi_index:
+            # Search modality-specific collections
+            for modality in modalities:
+                if modality in self.MODALITY_TYPES:
+                    results[modality] = self.vector_search_multi_index(
+                        query_embedding=query_embedding,
+                        modality=modality,
+                        limit=limit_per_modality,
+                        video_id_filter=video_id_filter
+                    )
+        else:
+            # Search unified collection with modality filters
+            for modality in modalities:
+                if modality in self.MODALITY_TYPES:
+                    results[modality] = self.vector_search(
+                        query_embedding=query_embedding,
+                        limit=limit_per_modality,
+                        modality_filter=modality,
+                        video_id_filter=video_id_filter
+                    )
+
+        return results
+
+    def vector_search_multi_index(
+        self,
+        query_embedding: list,
+        modality: str,
+        limit: int = 10,
+        num_candidates: int = 100,
+        video_id_filter: Optional[str] = None
+    ) -> list:
+        """
+        Perform vector search on a modality-specific collection.
+
+        Args:
+            query_embedding: Query embedding vector (512 dimensions)
+            modality: Modality type ("visual", "audio", "transcription")
+            limit: Maximum number of results to return
+            num_candidates: Number of candidates for HNSW search
+            video_id_filter: Filter by specific video ID
+
+        Returns:
+            List of matching documents with similarity scores
+        """
+        if modality not in self.MODALITY_TYPES:
+            raise ValueError(f"Invalid modality: {modality}")
+
+        collection_name = self.MODALITY_COLLECTIONS[modality]
+        index_name = self.MODALITY_INDEX_NAMES[modality]
+        collection = self.db[collection_name]
+
+        # Build filter
+        vector_search_filter = {}
+        if video_id_filter:
+            vector_search_filter["video_id"] = video_id_filter
+
+        pipeline = [
+            {
+                "$vectorSearch": {
+                    "index": index_name,
+                    "path": "embedding",
+                    "queryVector": query_embedding,
+                    "numCandidates": num_candidates,
+                    "limit": limit,
+                    **({"filter": vector_search_filter} if vector_search_filter else {})
+                }
+            },
+            {
+                "$project": {
+                    "video_id": 1,
+                    "segment_id": 1,
+                    "s3_uri": 1,
+                    "start_time": 1,
+                    "end_time": 1,
+                    "score": {"$meta": "vectorSearchScore"}
+                }
+            }
+        ]
+
+        results = list(collection.aggregate(pipeline))
+
+        # Add modality_type to match unified collection format
+        for result in results:
+            result["modality_type"] = modality
 
         return results
 

@@ -95,6 +95,11 @@ def lambda_handler(event: dict, context) -> dict:
     video_id = event.get("video_id") or generate_video_id(bucket, s3_key)
     embedding_types = event.get("embedding_types", ["visual", "audio", "transcription"])
 
+    # Segmentation configuration (defaults to dynamic shot boundary detection)
+    segmentation_method = event.get("segmentation_method", "dynamic")
+    min_duration_sec = event.get("min_duration_sec", 4)  # For dynamic segmentation
+    segment_length_sec = event.get("segment_length_sec", 6)  # For fixed segmentation
+
     try:
         # Initialize clients
         logger.info("Initializing Bedrock and MongoDB clients...")
@@ -129,11 +134,15 @@ def lambda_handler(event: dict, context) -> dict:
         # Generate embeddings from video
         logger.info(f"Generating embeddings for s3://{bucket}/{s3_key}")
         logger.info(f"Embedding types: {embedding_types}")
+        logger.info(f"Segmentation: {segmentation_method} (minDuration={min_duration_sec}s for dynamic, length={segment_length_sec}s for fixed)")
 
         embeddings_result = bedrock_client.get_video_embeddings(
             bucket=bucket,
             s3_key=s3_key,
-            embedding_types=embedding_types
+            embedding_types=embedding_types,
+            segmentation_method=segmentation_method,
+            min_duration_sec=min_duration_sec,
+            segment_length_sec=segment_length_sec
         )
 
         segments = embeddings_result.get("segments", [])

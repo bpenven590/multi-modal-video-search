@@ -601,8 +601,8 @@
             font-style: italic;
         }
 
-        /* Index Mode Toggle */
-        .index-toggle {
+        /* Backend Selector */
+        .backend-selector {
             display: flex;
             align-items: center;
             gap: 0.5rem;
@@ -611,9 +611,50 @@
             border-left: 1px solid #3d3d3d;
         }
 
+        .backend-selector-label {
+            font-size: 0.75rem;
+            color: #9ca3af;
+        }
+
+        .backend-dropdown {
+            background: #2a2a2a;
+            color: #e5e7eb;
+            border: 1px solid #3d3d3d;
+            border-radius: 6px;
+            padding: 0.375rem 0.75rem;
+            font-size: 0.75rem;
+            cursor: pointer;
+            outline: none;
+            transition: all 0.2s;
+        }
+
+        .backend-dropdown:hover {
+            border-color: #60a5fa;
+        }
+
+        .backend-dropdown:focus {
+            border-color: #60a5fa;
+            box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.1);
+        }
+
+        /* Index Mode Toggle */
+        .index-toggle {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding-left: 1rem;
+            border-left: 1px solid #3d3d3d;
+        }
+
         .index-toggle-label {
             font-size: 0.75rem;
             color: #9ca3af;
+        }
+
+        .index-mode-indicator {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #60a5fa;
         }
 
         /* LLM Decomposition Toggle */
@@ -740,24 +781,6 @@
             cursor: not-allowed;
         }
 
-        .index-mode-indicator {
-            font-size: 0.7rem;
-            padding: 0.15rem 0.4rem;
-            border-radius: 3px;
-            font-weight: 500;
-        }
-
-        .index-mode-indicator.mongodb {
-            background: rgba(16, 185, 129, 0.15);
-            color: #34d399;
-            border: 1px solid rgba(16, 185, 129, 0.3);
-        }
-
-        .index-mode-indicator.s3vectors {
-            background: rgba(251, 146, 60, 0.15);
-            color: #fb923c;
-            border: 1px solid rgba(251, 146, 60, 0.3);
-        }
 
         /* Fusion/Single Mode Labels */
         .fusion-label, .single-label {
@@ -1014,11 +1037,19 @@
             <button class="modality-btn" data-mode="audio" title="Search audio/sound only">Audio</button>
             <button class="modality-btn" data-mode="transcription" title="Search speech/transcription only">Speech</button>
 
+            <div class="backend-selector">
+                <span class="backend-selector-label">Backend:</span>
+                <select class="backend-dropdown" id="backendDropdown" title="Choose vector database backend">
+                    <option value="s3vectors">S3 Vectors</option>
+                    <option value="mongodb">MongoDB</option>
+                </select>
+            </div>
+
             <div class="index-toggle">
-                <span class="index-toggle-label">Backend:</span>
-                <span class="index-mode-indicator mongodb" id="indexModeIndicator">MongoDB (Single Index)</span>
-                <label class="toggle-switch" title="Toggle between MongoDB Atlas (single-index) and S3 Vectors (multi-index)">
-                    <input type="checkbox" id="multiIndexToggle">
+                <span class="index-toggle-label">Index Mode:</span>
+                <span class="index-mode-indicator" id="indexModeIndicator">Multi-Index</span>
+                <label class="toggle-switch" title="Toggle between Single-Index (unified collection) and Multi-Index (separate modality collections)">
+                    <input type="checkbox" id="indexModeToggle" checked>
                     <span class="toggle-slider"></span>
                 </label>
             </div>
@@ -1368,6 +1399,7 @@
                     const request = {
                         query,
                         limit: 20,
+                        backend: selectedBackend,
                         use_multi_index: useMultiIndex,
                         use_decomposition: useDecomposition
                     };
@@ -1396,6 +1428,7 @@
                         query,
                         limit: 20,
                         fusion_method: currentMode === 'rrf' ? 'rrf' : 'weighted',
+                        backend: selectedBackend,
                         use_multi_index: useMultiIndex,
                         use_decomposition: DECOMPOSITION_MODES.includes(currentMode) && useDecomposition
                     };
@@ -1444,6 +1477,7 @@
                         limit: 20,
                         modalities: [currentMode],
                         fusion_method: 'weighted',
+                        backend: selectedBackend,
                         use_multi_index: useMultiIndex
                     };
 
@@ -1490,7 +1524,8 @@
             searchInputData = {
                 mode: currentMode,
                 query: query,
-                backend: useMultiIndex ? 's3_vectors' : 'mongodb',
+                backend: selectedBackend,
+                use_multi_index: useMultiIndex,
                 fusion_method: currentMode === 'rrf' ? 'rrf' : 'weighted',
                 query_embeddings: responseData?.query_embeddings || null,
                 decomposed_queries: responseData?.decomposed_queries || null,
@@ -1865,51 +1900,43 @@
             outputCode.innerHTML = formatJSON(searchOutputData);
         }
 
-        // Multi-Index Toggle
-        const multiIndexToggle = document.getElementById('multiIndexToggle');
+        // Backend and Index Mode Controls
+        const backendDropdown = document.getElementById('backendDropdown');
+        const indexModeToggle = document.getElementById('indexModeToggle');
         const indexModeIndicator = document.getElementById('indexModeIndicator');
-        let useMultiIndex = false;  // Default to MongoDB
+        let selectedBackend = 's3vectors';  // Default to S3 Vectors
+        let useMultiIndex = true;  // Default to Multi-Index
 
-        // Check index mode availability on load
-        async function checkIndexMode() {
+        // Check backend availability on load
+        async function checkBackendAvailability() {
             try {
                 const response = await fetch('/api/index-mode');
                 if (!response.ok) return;
 
                 const data = await response.json();
 
-                if (data.s3_vectors_available) {
-                    // S3 Vectors available - enable toggle but keep MongoDB as default
-                    multiIndexToggle.disabled = false;
-                    multiIndexToggle.title = 'Toggle between MongoDB Atlas (single-index with filter) and S3 Vectors (multi-index)';
-                } else {
-                    // S3 Vectors not available - disable toggle and stay on MongoDB
-                    multiIndexToggle.disabled = true;
-                    multiIndexToggle.checked = false;
-                    useMultiIndex = false;
-                    indexModeIndicator.textContent = 'MongoDB (Single Index)';
-                    indexModeIndicator.classList.add('mongodb');
-                    indexModeIndicator.classList.remove('s3vectors');
-                    multiIndexToggle.title = 'S3 Vectors not available. Check AWS credentials and S3 vector bucket configuration.';
+                if (!data.s3_vectors_available) {
+                    // S3 Vectors not available - switch to MongoDB
+                    selectedBackend = 'mongodb';
+                    backendDropdown.value = 'mongodb';
+                    console.log('S3 Vectors not available, defaulting to MongoDB');
                 }
             } catch (error) {
-                console.log('Index mode check failed:', error);
+                console.log('Backend availability check failed:', error);
             }
         }
 
-        // Handle toggle change
-        multiIndexToggle.addEventListener('change', () => {
-            useMultiIndex = multiIndexToggle.checked;
+        // Handle backend dropdown change
+        backendDropdown.addEventListener('change', () => {
+            selectedBackend = backendDropdown.value;
 
-            // Update indicator
-            if (useMultiIndex) {
-                indexModeIndicator.textContent = 'S3 Vectors (Multi-Index)';
-                indexModeIndicator.classList.remove('mongodb');
-                indexModeIndicator.classList.add('s3vectors');
-            } else {
-                indexModeIndicator.textContent = 'MongoDB (Single Index)';
-                indexModeIndicator.classList.remove('s3vectors');
-                indexModeIndicator.classList.add('mongodb');
+            // For MongoDB, disable single-index mode (not yet implemented)
+            // TODO: Remove this once MongoDB unified-embeddings index is created
+            if (selectedBackend === 'mongodb' && !useMultiIndex) {
+                // Force multi-index for MongoDB
+                useMultiIndex = true;
+                indexModeToggle.checked = true;
+                updateIndexModeIndicator();
             }
 
             // Re-run search if we have a query
@@ -1918,8 +1945,24 @@
             }
         });
 
+        // Handle index mode toggle change
+        indexModeToggle.addEventListener('change', () => {
+            useMultiIndex = indexModeToggle.checked;
+            updateIndexModeIndicator();
+
+            // Re-run search if we have a query
+            if (searchInput.value.trim()) {
+                performSearch();
+            }
+        });
+
+        // Update index mode indicator text
+        function updateIndexModeIndicator() {
+            indexModeIndicator.textContent = useMultiIndex ? 'Multi-Index' : 'Single-Index';
+        }
+
         // Initialize on page load
-        checkIndexMode();
+        checkBackendAvailability();
     </script>
 </body>
 </html>

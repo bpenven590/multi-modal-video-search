@@ -33,3 +33,7 @@ dist/
 
 # Logs
 *.log
+
+# Local documentation (not for git)
+WORKFLOW.local.md
+*.local.md
