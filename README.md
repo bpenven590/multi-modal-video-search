@@ -556,8 +556,8 @@ MongoDB now supports **both single-index and multi-index modes** for A/B testing
 ### Step 1: Run Migration Script
 
 ```bash
-# Set MongoDB connection string
-export MONGODB_URI="mongodb+srv://user:pass@cluster.mongodb.net/video_search"
+# Set MongoDB connection string (replace with your actual connection string)
+export MONGODB_URI="<your_mongodb_connection_string>"
 
 # Run migration
 python migrate_mongodb_multi_index.py
