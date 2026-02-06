@@ -599,7 +599,7 @@ Use the infrastructure setup script to deploy everything automatically.
 
 ```bash
 # 1. Clone repository
-git clone https://github.com/YOUR_USERNAME/multi-modal-video-search.git
+git clone https://github.com/twelvelabs-io/multi-modal-video-search.git
 cd multi-modal-video-search
 
 # 2. Install dependencies
@@ -632,7 +632,7 @@ Follow these steps to set up each component individually.
 
 ```bash
 # Clone repository
-git clone https://github.com/YOUR_USERNAME/multi-modal-video-search.git
+git clone https://github.com/twelvelabs-io/multi-modal-video-search.git
 cd multi-modal-video-search
 
 # Create virtual environment
