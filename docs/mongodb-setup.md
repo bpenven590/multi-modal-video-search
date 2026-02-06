@@ -39,12 +39,12 @@ This guide walks you through setting up MongoDB Atlas for the multi-modal video 
 2. Select Driver: Python, Version: 3.11 or later
 3. Copy connection string:
    ```
-   mongodb+srv://video_search_user:<password>@cluster0.xxxxx.mongodb.net/?retryWrites=true&w=majority
+   mongodb+srv://<username>:<password>@<your-cluster>.mongodb.net/?retryWrites=true&w=majority
    ```
-4. Replace `<password>` with your actual password
+4. Replace `<username>` and `<password>` with your actual credentials
 5. Add to `.env` file:
    ```bash
-   MONGODB_URI=mongodb+srv://video_search_user:YOUR_PASSWORD@cluster0.xxxxx.mongodb.net/?retryWrites=true&w=majority
+   MONGODB_URI=mongodb+srv://<username>:<password>@<your-cluster>.mongodb.net/?retryWrites=true&w=majority
    MONGODB_DATABASE=video_search
    ```
 

@@ -47,7 +47,7 @@ nano .env  # or vim, code, etc.
 Required variables:
 ```bash
 # MongoDB Atlas connection string
-MONGODB_URI=mongodb+srv://user:password@cluster.mongodb.net/?appName=Cluster0
+MONGODB_URI=mongodb+srv://<username>:<password>@<your-cluster>.mongodb.net/?appName=Cluster0
 
 # AWS configuration
 AWS_REGION=us-east-1

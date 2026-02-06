@@ -50,7 +50,7 @@ Add these environment variables:
 ```bash
 AWS_REGION=us-east-1
 CLOUDFRONT_DOMAIN=xxxxx.cloudfront.net
-MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/?appName=Cluster0
+MONGODB_URI=mongodb+srv://<username>:<password>@<your-cluster>.mongodb.net/?appName=Cluster0
 MONGODB_DATABASE=video_search
 S3_VECTORS_BUCKET=your-vectors-bucket (optional)
 PYTHONPATH=/app/deps
