@@ -36,6 +36,7 @@ MONGODB_URI = os.environ.get("MONGODB_URI")
 S3_BUCKET = os.environ.get("S3_BUCKET", "your-media-bucket-name")
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
 CLOUDFRONT_DOMAIN = os.environ.get("CLOUDFRONT_DOMAIN", "xxxxx.cloudfront.net")
+MONGODB_DATABASE = os.environ.get("MONGODB_DATABASE", "video_search")
 
 OLD_S3_PREFIX = "s3://tl-brice-media/WBD_project/Videos/proxy/"
 NEW_S3_PREFIX = f"s3://{S3_BUCKET}/proxies/"
@@ -90,6 +91,7 @@ def get_search_client() -> VideoSearchClient:
             raise ValueError("MONGODB_URI environment variable is required")
         _search_client = VideoSearchClient(
             mongodb_uri=MONGODB_URI,
+            database_name=MONGODB_DATABASE,
             bedrock_region=AWS_REGION
         )
     return _search_client
