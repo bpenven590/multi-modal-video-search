@@ -20,14 +20,14 @@ def cosine_similarity_matrix(vectors: np.ndarray) -> np.ndarray:
 
 def cluster_videos(
     video_embeddings: dict[str, list],
-    distance_threshold: float = 0.3
+    distance_threshold: float = 0.12
 ) -> list[dict]:
     """
     Cluster videos by embedding similarity.
 
     Args:
         video_embeddings: {video_id: 512d_embedding_list}
-        distance_threshold: Cosine distance threshold for grouping (0.3 = 0.7 similarity)
+        distance_threshold: Cosine distance threshold for grouping (0.12 = 88% similarity)
 
     Returns:
         List of cluster dicts with keys:
